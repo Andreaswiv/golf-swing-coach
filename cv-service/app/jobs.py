@@ -21,18 +21,26 @@ from .config import Settings
 from .pipeline import run_pipeline
 from .pose.base import PoseEstimator
 from .schemas import JobRequest, JobState
+from .club.detector import ClubDetector
 from .video import VideoError
 
 log = logging.getLogger("cv.jobs")
 
 EstimatorFactory = Callable[[], PoseEstimator]
+ClubDetectorFactory = Callable[[], "ClubDetector"]
 MAX_REMEMBERED_JOBS = 200
 
 
 class JobManager:
-    def __init__(self, settings: Settings, estimator_factory: EstimatorFactory) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        estimator_factory: EstimatorFactory,
+        club_factory: ClubDetectorFactory | None = None,
+    ) -> None:
         self._settings = settings
         self._factory = estimator_factory
+        self._club_factory = club_factory
         self._jobs: "OrderedDict[str, JobState]" = OrderedDict()
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cv-job")
@@ -68,9 +76,20 @@ class JobManager:
                 for key, value in changes.items():
                     setattr(state, key, value)
 
+    def _create_club_detector(self) -> ClubDetector | None:
+        """Club detection is optional: a missing or broken model must not fail the analysis."""
+        if self._club_factory is None:
+            return None
+        try:
+            return self._club_factory()
+        except Exception:  # noqa: BLE001
+            log.exception("Club detector could not be loaded; continuing without club tracking")
+            return None
+
     def _run(self, job_id: str, request: JobRequest, video_abs, keypoints_abs) -> None:
         self._update(job_id, status="running", progress=1, stage="Starting")
         try:
+            club = self._create_club_detector()
             with self._factory() as estimator:
                 output = run_pipeline(
                     video_path=video_abs,
@@ -82,7 +101,10 @@ class JobManager:
                         job_id, progress=pct, stage=stage
                     ),
                     max_process_dim=self._settings.max_process_dim,
+                    club_detector=club,
                 )
+            if club is not None:
+                club.close()
             result = {
                 "pipeline_version": PIPELINE_VERSION,
                 "pose_model": output.pose_model,

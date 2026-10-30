@@ -26,7 +26,13 @@ def _create_estimator() -> PoseEstimator:
     return MediaPipePoseEstimator(settings.pose_model_path, num_poses=settings.num_poses)
 
 
-jobs = JobManager(settings, _create_estimator)
+def _create_club_detector():
+    from .club.detector import OnnxClubDetector
+
+    return OnnxClubDetector(settings.club_model_path)
+
+
+jobs = JobManager(settings, _create_estimator, _create_club_detector if settings.club_detection else None)
 
 
 @asynccontextmanager
@@ -42,6 +48,7 @@ app = FastAPI(title="GolfCoach CV Service", version=PIPELINE_VERSION, lifespan=l
 def health() -> dict:
     model_present = settings.pose_model_path.is_file()
     return {
+        "club_model_present": settings.club_detection and settings.club_model_path.is_file(),
         "status": "ok" if model_present and settings.data_dir.is_dir() else "degraded",
         "pipeline_version": PIPELINE_VERSION,
         "pose_model_present": model_present,

@@ -1,17 +1,21 @@
-import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import type { SwingPhase } from "../api";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
+import type { ClubSummary, ClubTrackPoint, SwingPhase } from "../api";
 import {
   CONFIDENT_VISIBILITY,
   JOINTS,
   SEGMENTS,
   frameIndexAt,
+  hasClubData,
   loadKeypoints,
+  clubLineAt,
+  rejectedByFrame,
   type KeypointFrame,
   type KeypointsFile,
+  type ShaftLine,
   type Side,
 } from "../keypoints";
 import { PHASE_HINT, PHASE_LABEL } from "../swingLabels";
-import { ChevronLeft, ChevronRight } from "./icons";
+import { ChevronLeft, ChevronRight, ExpandIcon, PauseIcon, PlayIcon, ShrinkIcon } from "./icons";
 
 const SPEEDS = [0.1, 0.25, 0.5, 1];
 
@@ -20,6 +24,11 @@ const COLORS: Record<Side, string> = {
   right: "#f0b93a",
   center: "#ffffff",
 };
+const HIDE_UNCERTAIN_KEY = "golfcoach.hideUncertainJoints";
+const CLUB_COLOR = "#5ee38a";
+const PLANE_COLOR = "#ff5a7a";
+
+type Plane = NonNullable<ClubSummary["plane"]>;
 
 export interface SwingPlayerHandle {
   /** Pause and show the given frame. */
@@ -30,19 +39,47 @@ interface Props {
   videoUrl: string;
   keypointsUrl: string | null;
   phases?: SwingPhase[];
+  /** Swing plane from the club analysis (down-the-line only). */
+  plane?: Plane | null;
+  /** The club per frame as the analysis used it (impossible detections removed). */
+  clubTrack?: (ClubTrackPoint | null)[];
+  /** Joints the analysis dropped as impossible, by landmark name -> frames. Not drawn. */
+  rejectedLandmarks?: Record<string, number[]>;
   ref?: Ref<SwingPlayerHandle>;
 }
 
-/** Video player with the detected skeleton drawn on top, in sync with playback, and the swing phases below. */
-export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }: Props) {
+/**
+ * Video player with the detected skeleton, club and swing plane drawn on top, in sync with
+ * playback, and the swing phases below.
+ */
+export default function SwingPlayer({
+  videoUrl,
+  keypointsUrl,
+  phases = [],
+  plane = null,
+  clubTrack,
+  rejectedLandmarks,
+  ref,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [speed, setSpeed] = useState(1);
   const [keypoints, setKeypoints] = useState<KeypointsFile | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showSkeleton, setShowSkeleton] = useState(true);
-  const [hideUncertain, setHideUncertain] = useState(false);
+  // On by default: joints hidden behind the body (the lead arm from down-the-line) are guesses and
+  // often drawn in the wrong place. Remembered between visits.
+  const [hideUncertain, setHideUncertain] = useState(() => localStorage.getItem(HIDE_UNCERTAIN_KEY) !== "false");
+  useEffect(() => localStorage.setItem(HIDE_UNCERTAIN_KEY, String(hideUncertain)), [hideUncertain]);
+  const [showClub, setShowClub] = useState(true);
+  const [showPlane, setShowPlane] = useState(true);
   const [frameIndex, setFrameIndex] = useState(0);
+  // Our own controls (the browser's add a fullscreen button that drops the overlay, and Safari's
+  // cannot be hidden). shownSeconds follows the frame on screen; scrubTo is set while dragging.
+  const [playing, setPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [shownSeconds, setShownSeconds] = useState(0);
+  const [scrubTo, setScrubTo] = useState<number | null>(null);
   const [aspectMismatch, setAspectMismatch] = useState(false);
 
   useEffect(() => {
@@ -57,14 +94,18 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
   }, [speed]);
 
   // Latest settings for the draw loop, which outlives individual renders.
-  const settings = useRef({ showSkeleton, hideUncertain, keypoints });
-  settings.current = { showSkeleton, hideUncertain, keypoints };
+  const rejected = useMemo(
+    () => (keypoints ? rejectedByFrame(keypoints, rejectedLandmarks) : new Map<number, Set<number>>()),
+    [keypoints, rejectedLandmarks],
+  );
+  const settings = useRef({ showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected });
+  settings.current = { showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected };
 
   const draw = useCallback((time: number) => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    const { showSkeleton, hideUncertain, keypoints } = settings.current;
+    const { showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected } = settings.current;
 
     const dpr = window.devicePixelRatio || 1;
     const cw = video.clientWidth;
@@ -78,17 +119,35 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
 
-    if (!keypoints || keypoints.frames.length === 0) return;
+    if (!keypoints || keypoints.frames.length === 0) return setShownSeconds(time);
     const index = frameIndexAt(keypoints.frames, time);
     setFrameIndex(index);
-    if (!showSkeleton || !video.videoWidth) return;
+    setShownSeconds(time);
+    if (!video.videoWidth) return;
 
     // The video is letterboxed inside its element (object-fit: contain).
     const scale = Math.min(cw / video.videoWidth, ch / video.videoHeight);
     const w = video.videoWidth * scale;
     const h = video.videoHeight * scale;
-    drawSkeleton(ctx, keypoints.frames[index], (cw - w) / 2, (ch - h) / 2, w, h, hideUncertain);
+    const ox = (cw - w) / 2;
+    const oy = (ch - h) / 2;
+    const frame = keypoints.frames[index];
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ox, oy, w, h);
+    ctx.clip(); // the plane line runs past the frame edge
+    if (showPlane && plane) drawPlane(ctx, plane, ox, oy, w, h);
+    if (showSkeleton) drawSkeleton(ctx, frame, ox, oy, w, h, hideUncertain, rejected.get(index));
+    if (showClub) drawClub(ctx, clubLineAt(frame, index, clubTrack, w / h), ox, oy, w, h);
+    ctx.restore();
   }, []);
+
+  // Media time of the frame actually on screen. While scrubbing, currentTime jumps ahead of the
+  // picture (the browser may not have decoded the new frame yet, or skips it), so the overlay is
+  // only ever drawn for the presented frame.
+  const presentedTime = useRef<number | null>(null);
+  const shownTime = useCallback(() => presentedTime.current ?? videoRef.current?.currentTime ?? 0, []);
 
   // Redraw on every presented video frame; fall back to animation frames.
   useEffect(() => {
@@ -96,10 +155,15 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
     if (!video) return;
     let stopped = false;
     let handle = 0;
+    const frameCallbacks = "requestVideoFrameCallback" in video;
 
-    if ("requestVideoFrameCallback" in video) {
+    let presentedSinceSeek = true;
+    let fallback = 0;
+    if (frameCallbacks) {
       const onFrame = (_now: number, meta: VideoFrameCallbackMetadata) => {
         if (stopped) return;
+        presentedSinceSeek = true;
+        presentedTime.current = meta.mediaTime;
         draw(meta.mediaTime);
         handle = video.requestVideoFrameCallback(onFrame);
       };
@@ -113,9 +177,26 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
       handle = requestAnimationFrame(onTick);
     }
 
-    // Frame callbacks do not fire for every seek or resize, so redraw then too.
-    const redraw = () => draw(video.currentTime);
-    video.addEventListener("seeked", redraw);
+    // Without frame callbacks, seeks while paused need a redraw. With them, the callback fires
+    // when the sought frame is actually shown, so a seek alone must not move the overlay.
+    // Some browsers (Safari) do not always report the frame shown after a seek while paused; if
+    // nothing is reported shortly after the seek, the sought frame is what is on screen.
+    const onSeeking = () => {
+      presentedSinceSeek = false;
+    };
+    const onSeeked = () => {
+      const v = video as HTMLVideoElement;
+      if (!frameCallbacks) return draw(v.currentTime);
+      window.clearTimeout(fallback);
+      fallback = window.setTimeout(() => {
+        if (stopped || presentedSinceSeek || v.seeking) return;
+        presentedTime.current = v.currentTime;
+        draw(v.currentTime);
+      }, 150);
+    };
+    const redraw = () => draw(shownTime());
+    video.addEventListener("seeking", onSeeking);
+    video.addEventListener("seeked", onSeeked);
     video.addEventListener("loadeddata", redraw);
     const resize = new ResizeObserver(redraw);
     resize.observe(video);
@@ -124,16 +205,44 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
       stopped = true;
       if ("cancelVideoFrameCallback" in video) video.cancelVideoFrameCallback(handle);
       else cancelAnimationFrame(handle);
-      video.removeEventListener("seeked", redraw);
+      window.clearTimeout(fallback);
+      video.removeEventListener("seeking", onSeeking);
+      video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("loadeddata", redraw);
       resize.disconnect();
     };
-  }, [draw]);
+  }, [draw, shownTime]);
 
-  // Toggling a setting while paused needs an explicit redraw.
+  // Toggling a setting while paused needs an explicit redraw (of the frame on screen).
   useEffect(() => {
-    if (videoRef.current) draw(videoRef.current.currentTime);
-  }, [showSkeleton, hideUncertain, keypoints, draw]);
+    draw(shownTime());
+  }, [showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected, draw, shownTime]);
+
+  // Fullscreen for the video AND its overlay. The browser's own fullscreen button only enlarges
+  // the <video>, which leaves the skeleton and club behind, so it is replaced where possible.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const canFullscreen = typeof document !== "undefined" && !!document.fullscreenEnabled;
+  // iPhone Safari only lets a bare <video> go fullscreen (without the overlay): better than nothing.
+  const videoOnlyFullscreen = (v: HTMLVideoElement | null) =>
+    v as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === stageRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggleFullscreen = useCallback(() => {
+    if (!canFullscreen) return videoOnlyFullscreen(videoRef.current)?.webkitEnterFullscreen?.();
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void stageRef.current?.requestFullscreen();
+  }, [canFullscreen]);
+
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused || video.ended) void video.play();
+    else video.pause();
+  }, []);
 
   // Keypoints are in the orientation the analysis saw; warn if the browser shows another.
   const checkAspect = useCallback(() => {
@@ -146,7 +255,10 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
   useEffect(checkAspect, [keypoints, checkAspect]);
 
   function onLoadedMetadata() {
-    if (videoRef.current) videoRef.current.playbackRate = speed;
+    if (videoRef.current) {
+      videoRef.current.playbackRate = speed;
+      setDuration(videoRef.current.duration || 0);
+    }
     checkAspect();
   }
 
@@ -162,23 +274,100 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
   );
   useImperativeHandle(ref, () => ({ seekToFrame }), [seekToFrame]);
 
+  // Step from where the video IS (or is seeking to), not from the last frame the overlay drew: that
+  // can lag behind after scrubbing, and stepping from it jumped back to an old frame or the start.
+  const stepFrames = useCallback(
+    (delta: number) => {
+      const video = videoRef.current;
+      const frames = keypoints?.frames;
+      if (!video || !frames?.length) return;
+      seekToFrame(frameIndexAt(frames, video.currentTime) + delta);
+    },
+    [keypoints, seekToFrame],
+  );
+
   const frames = keypoints?.frames ?? [];
   const current: KeypointFrame | undefined = frames[frameIndex];
   const clipEnd = frames.length ? frames[frames.length - 1].t : 0;
   const currentPhase = [...phases].reverse().find((p) => p.frame_index <= frameIndex);
+  const aspect = keypoints ? keypoints.video.width / keypoints.video.height : 1;
+  const clubTracked = useMemo(() => (keypoints ? hasClubData(keypoints) : false), [keypoints]);
 
   return (
     <div className="space-y-3">
-      <div className="relative overflow-hidden rounded-2xl bg-black shadow-[var(--shadow-card)]">
-        <video
-          ref={videoRef}
-          src={videoUrl}
-          controls
-          playsInline
-          className="mx-auto block max-h-[70vh] w-full"
-          onLoadedMetadata={onLoadedMetadata}
-        />
-        <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
+      <div
+        ref={stageRef}
+        tabIndex={0}
+        aria-label="Swing video. Space plays or pauses, the arrow keys step one frame."
+        onKeyDown={(e) => {
+          if (e.key === " " || e.key === "k") {
+            e.preventDefault();
+            togglePlay();
+          } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            stepFrames(e.key === "ArrowLeft" ? -1 : 1);
+          }
+        }}
+        className={`flex flex-col overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+          fullscreen ? "h-full w-full" : "rounded-2xl shadow-[var(--shadow-card)]"
+        }`}
+      >
+        <div className="relative min-h-0 flex-1">
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            playsInline
+            disablePictureInPicture
+            className={fullscreen ? "h-full w-full" : "mx-auto block max-h-[70vh] w-full"}
+            onLoadedMetadata={onLoadedMetadata}
+            onDurationChange={(e) => setDuration(e.currentTarget.duration || 0)}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => setPlaying(false)}
+            onClick={togglePlay}
+            onDoubleClick={toggleFullscreen}
+          />
+          <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />
+        </div>
+
+        {/* Below the video, not on top of it: it would cover the feet and the ball. */}
+        <div className="flex items-center gap-3 px-3 py-2 text-white">
+          <button
+            onClick={togglePlay}
+            className="rounded-lg p-1.5 transition-colors hover:bg-white/15"
+            aria-label={playing ? "Pause" : "Play"}
+          >
+            {playing ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
+          </button>
+          <span className="tnum shrink-0 text-xs text-white/80">
+            {(scrubTo ?? shownSeconds).toFixed(2)} / {duration.toFixed(2)} s
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={duration || 0}
+            step="any"
+            value={Math.min(scrubTo ?? shownSeconds, duration || 0)}
+            aria-label="Position in the video"
+            onChange={(e) => {
+              const t = Number(e.target.value);
+              setScrubTo(t);
+              if (videoRef.current) videoRef.current.currentTime = t;
+            }}
+            onPointerUp={() => setScrubTo(null)}
+            onKeyUp={() => setScrubTo(null)}
+            onBlur={() => setScrubTo(null)}
+            className="h-1.5 min-w-0 flex-1 cursor-pointer accent-[var(--color-brand)]"
+          />
+          <button
+            onClick={toggleFullscreen}
+            className="rounded-lg p-1.5 transition-colors hover:bg-white/15"
+            aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+            title={fullscreen ? "Exit full screen" : "Full screen (with the overlay)"}
+          >
+            {fullscreen ? <ShrinkIcon className="h-5 w-5" /> : <ExpandIcon className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
 
       <div className="card space-y-4 p-4">
@@ -226,13 +415,13 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
         <div className="flex flex-wrap items-center justify-between gap-3">
           {keypoints ? (
             <div className="flex items-center gap-1">
-              <button onClick={() => seekToFrame(frameIndex - 1)} className="btn-quiet rounded-lg" aria-label="Previous frame">
+              <button onClick={() => stepFrames(-1)} className="btn-quiet rounded-lg" aria-label="Previous frame">
                 <ChevronLeft className="h-5 w-5" />
               </button>
               <span className="tnum min-w-[6.5rem] text-center text-xs text-mute">
                 Frame {current ? current.i + 1 : "–"} / {frames.length}
               </span>
-              <button onClick={() => seekToFrame(frameIndex + 1)} className="btn-quiet rounded-lg" aria-label="Next frame">
+              <button onClick={() => stepFrames(1)} className="btn-quiet rounded-lg" aria-label="Next frame">
                 <ChevronRight className="h-5 w-5" />
               </button>
             </div>
@@ -269,11 +458,40 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
               />
               Hide hidden joints
             </label>
-            <span className="flex items-center gap-3 text-xs text-mute">
+            {clubTracked && (
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showClub}
+                  onChange={(e) => setShowClub(e.target.checked)}
+                  className="h-4 w-4 accent-[var(--color-brand)]"
+                />
+                Club
+              </label>
+            )}
+            {plane && (
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showPlane}
+                  onChange={(e) => setShowPlane(e.target.checked)}
+                  className="h-4 w-4 accent-[var(--color-brand)]"
+                />
+                Swing plane
+              </label>
+            )}
+            <span className="flex flex-wrap items-center gap-3 text-xs text-mute">
               <Legend color={COLORS.left} label="Left side" />
               <Legend color={COLORS.right} label="Right side" />
+              {clubTracked && <Legend color={CLUB_COLOR} label="Club" />}
+              {plane && <Legend color={PLANE_COLOR} label="Plane at address" dashed />}
             </span>
           </div>
+        )}
+        {current && clubTracked && showClub && !clubLineAt(current, frameIndex, clubTrack, aspect) && (
+          <p className="text-sm text-mute">
+            {current.club ? "The club was not found in this frame." : "The club is only tracked around the swing."}
+          </p>
         )}
 
         {current && !current.lm && <p className="text-sm text-bad">No person was detected in this frame.</p>}
@@ -296,13 +514,71 @@ export default function SwingPlayer({ videoUrl, keypointsUrl, phases = [], ref }
   );
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
+function Legend({ color, label, dashed = false }: { color: string; label: string; dashed?: boolean }) {
+  const background = dashed ? `repeating-linear-gradient(90deg, ${color} 0 4px, transparent 4px 7px)` : color;
   return (
     <span className="flex items-center gap-1.5">
-      <span className="inline-block h-1 w-4 rounded" style={{ background: color }} />
+      <span className="inline-block h-1 w-4 rounded" style={{ background }} />
       {label}
     </span>
   );
+}
+
+/** Stroke a line with a dark underlay so it stays readable on bright backgrounds. */
+function strokeLine(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, color: string, width: number) {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.lineWidth = width + 2;
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+function drawPlane(ctx: CanvasRenderingContext2D, plane: Plane, ox: number, oy: number, w: number, h: number) {
+  const lineWidth = Math.max(2, Math.min(w, h) / 200);
+  ctx.setLineDash([lineWidth * 4, lineWidth * 3]);
+  ctx.lineCap = "butt";
+  strokeLine(
+    ctx,
+    ox + plane.from[0] * w,
+    oy + plane.from[1] * h,
+    ox + plane.to[0] * w,
+    oy + plane.to[1] * h,
+    PLANE_COLOR,
+    lineWidth,
+  );
+  ctx.setLineDash([]);
+}
+
+function drawClub(ctx: CanvasRenderingContext2D, line: ShaftLine | null, ox: number, oy: number, w: number, h: number) {
+  if (!line) return;
+  const lineWidth = Math.max(2, Math.min(w, h) / 160);
+  const gx = ox + line.grip[0] * w;
+  const gy = oy + line.grip[1] * h;
+  const hx = ox + line.head[0] * w;
+  const hy = oy + line.head[1] * h;
+
+  ctx.lineCap = "round";
+  // A head end inferred from the shaft box is less certain: draw it dashed.
+  ctx.setLineDash(line.headFound ? [] : [lineWidth * 2, lineWidth * 2]);
+  strokeLine(ctx, gx, gy, hx, hy, CLUB_COLOR, lineWidth);
+  ctx.setLineDash([]);
+
+  for (const [x, y, r] of [
+    [gx, gy, lineWidth * 1.6],
+    [hx, hy, lineWidth * 2.4],
+  ]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = line.headFound || r < lineWidth * 2 ? CLUB_COLOR : "rgba(0,0,0,0.4)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
 }
 
 /** A time inside frame `index`, away from its edges, so seeking lands on that frame. */
@@ -322,16 +598,20 @@ function drawSkeleton(
   w: number,
   h: number,
   hideUncertain: boolean,
+  dropped?: Set<number>,
 ) {
   const lm = frame.lm;
   if (!lm) return;
   const px = (i: number) => ox + lm[i][0] * w;
   const py = (i: number) => oy + lm[i][1] * h;
   const confident = (i: number) => lm[i][3] >= CONFIDENT_VISIBILITY;
+  // Dropped by the analysis as impossible (a glitch or an over-long limb): never drawn.
+  const ok = (i: number) => !dropped?.has(i);
   const lineWidth = Math.max(2, Math.min(w, h) / 160);
 
   ctx.lineCap = "round";
   for (const [a, b, side] of SEGMENTS) {
+    if (!ok(a) || !ok(b)) continue;
     const sure = confident(a) && confident(b);
     if (!sure && hideUncertain) continue;
     ctx.globalAlpha = sure ? 1 : 0.4;
@@ -351,6 +631,7 @@ function drawSkeleton(
 
   const radius = lineWidth * 1.4;
   for (const [i, side] of JOINTS) {
+    if (!ok(i)) continue;
     const sure = confident(i);
     if (!sure && hideUncertain) continue;
     ctx.globalAlpha = sure ? 1 : 0.4;

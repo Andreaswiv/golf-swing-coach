@@ -1,7 +1,16 @@
 // Display names and plain-language meanings for the swing analysis.
 // Definitions live in cv-service/app/swing/measurements.py; keep the two in sync.
 
-import { angleLabel, type Analysis, type PhaseName, type SwingFeedback, type SwingMeasurement } from "./api";
+import {
+  angleLabel,
+  type Analysis,
+  type MomentName,
+  type PhaseName,
+  type Rating,
+  type SwingFeedback,
+  type SwingFinding,
+  type SwingMeasurement,
+} from "./api";
 
 export const PHASE_LABEL: Record<PhaseName, string> = {
   address: "Address",
@@ -18,6 +27,8 @@ export const PHASE_HINT: Record<PhaseName, string> = {
   impact: "Hands at their lowest point in the downswing",
   finish: "Hands reach their highest follow-through position",
 };
+
+export const MOMENT_LABEL: Record<MomentName, string> = { ...PHASE_LABEL, downswing: "Downswing" };
 
 interface MeasurementInfo {
   label: string;
@@ -69,7 +80,27 @@ const INFO: Record<string, MeasurementInfo> = {
   },
   lead_arm_bend_top: { label: "Lead arm bend at the top", meaning: "0° = a straight lead arm." },
   stance_width_address: { label: "Stance width", meaning: "Distance between the ankles divided by shoulder width." },
+  // Club measurements (cv-service/app/swing/club.py).
+  shaft_points_downswing: {
+    label: "Where the shaft points, halfway down",
+    meaning: "Shaft extended to the ground. Positive = beyond the ball (steep, over the top); negative = inside it.",
+  },
+  hand_path_downswing: {
+    label: "Hand path, down vs. back",
+    meaning: "Positive = the hands come down outside the path they went back on.",
+  },
+  shaft_past_parallel_top: {
+    label: "Shaft at the top",
+    meaning: "0° = parallel to the ground. Positive = past parallel; negative = short of it.",
+  },
 };
+
+/** Measurements that come from club tracking rather than the body. */
+export const CLUB_MEASUREMENTS = new Set(["shaft_points_downswing", "hand_path_downswing", "shaft_past_parallel_top"]);
+
+export function isClubFinding(f: SwingFinding): boolean {
+  return f.measurements.some((m) => CLUB_MEASUREMENTS.has(m));
+}
 
 export function measurementInfo(name: string): MeasurementInfo {
   return INFO[name] ?? { label: name.replace(/_/g, " "), meaning: "" };
@@ -79,7 +110,9 @@ export function formatMeasurement(m: SwingMeasurement): string {
   const sign = (v: number) => (v > 0 ? "+" : v < 0 ? "−" : "");
   switch (m.unit) {
     case "deg":
-      return m.name.includes("change") ? `${sign(m.value)}${Math.abs(m.value).toFixed(1)}°` : `${m.value.toFixed(1)}°`;
+      return m.name.includes("change") || m.name.includes("past_parallel")
+        ? `${sign(m.value)}${Math.abs(m.value).toFixed(1)}°`
+        : `${m.value.toFixed(1)}°`;
     case "% torso":
       return `${sign(m.value)}${Math.abs(m.value).toFixed(1)}% of torso`;
     case "s":
@@ -90,6 +123,12 @@ export function formatMeasurement(m: SwingMeasurement): string {
       return `${m.value} ${m.unit}`;
   }
 }
+
+export const RATING: Record<Rating, { text: string; value: string; pill: string; dot: string }> = {
+  good: { text: "Good", value: "text-good", pill: "bg-good-soft text-good", dot: "bg-good" },
+  watch: { text: "Slightly off", value: "text-warn", pill: "bg-warn-soft text-warn", dot: "bg-warn" },
+  bad: { text: "Clearly off", value: "text-bad", pill: "bg-bad-soft text-bad", dot: "bg-bad" },
+};
 
 export function confidenceLabel(c: number): { text: string; cls: string } {
   if (c >= 0.75) return { text: "High confidence", cls: "text-good" };

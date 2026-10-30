@@ -6,6 +6,7 @@ import QualityReportView from "../components/QualityReportView";
 import SwingPlayer, { type SwingPlayerHandle } from "../components/SwingPlayer";
 import SwingFeedbackView from "../components/SwingFeedbackView";
 import SwingResults from "../components/SwingResults";
+import ClubTrackingView from "../components/ClubTrackingView";
 import { swingTitle } from "../swingLabels";
 
 export default function AnalysisResult() {
@@ -116,6 +117,9 @@ export default function AnalysisResult() {
             videoUrl={api.videoUrl(analysis.id)}
             keypointsUrl={analysis.keypoints ? api.keypointsUrl(analysis.id) : null}
             phases={analysis.swing?.phases}
+            plane={analysis.swing?.club?.plane}
+            clubTrack={analysis.swing?.club?.track}
+            rejectedLandmarks={analysis.swing?.rejected_landmarks}
           />
         </div>
 
@@ -145,6 +149,8 @@ export default function AnalysisResult() {
               </p>
             </div>
           )}
+
+          {analysis.swing && analysis.swing.status === "ok" && <ClubTrackingView swing={analysis.swing} />}
 
           {analysis.swing && analysis.swing.status === "ok" && <SwingResults swing={analysis.swing} onSeek={seek} />}
 

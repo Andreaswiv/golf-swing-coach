@@ -1,5 +1,5 @@
 import type { SwingFeedback, SwingFinding } from "../api";
-import { TONE_CLASS, verdict } from "../swingLabels";
+import { TONE_CLASS, isClubFinding, verdict } from "../swingLabels";
 import { CheckIcon, EyeIcon, InfoIcon, TargetIcon } from "./icons";
 
 const KIND: Record<SwingFinding["kind"], { label: string; badge: string; icon: typeof CheckIcon; iconCls: string }> = {
@@ -54,7 +54,14 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
                 <Icon />
               </span>
               <div className="min-w-0 flex-1">
-                <p className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${kind.badge}`}>{kind.label}</p>
+                <p className="flex flex-wrap gap-1.5">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${kind.badge}`}>{kind.label}</span>
+                  {isClubFinding(f) && (
+                    <span className="rounded-full bg-subtle px-2 py-0.5 text-xs font-semibold text-mute">
+                      From club tracking
+                    </span>
+                  )}
+                </p>
                 <h3 className="mt-1.5 text-lg">{f.title}</h3>
                 <p className="mt-2 leading-relaxed">{f.detail}</p>
 

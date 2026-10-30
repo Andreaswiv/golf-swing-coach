@@ -4,3 +4,5 @@ pydantic>=2.7
 numpy>=1.26
 # mediapipe pulls in opencv-contrib-python (provides cv2); do not add a second OpenCV package.
 mediapipe>=0.10.21
+# Club detection runs the SwingTrace model converted to ONNX (see the Dockerfile).
+onnxruntime>=1.20,<2

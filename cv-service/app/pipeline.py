@@ -4,6 +4,8 @@ Responsibilities:
   * decode the video frame by frame
   * run a ``PoseEstimator`` on every frame
   * pick the golfer when several people are detected
+  * find the swing from the pose and run the (much slower) club detector only
+    around it, in a second pass over the video
   * write the RAW (unsmoothed, unmirrored) keypoints to a JSON file
   * run the quality checks
   * run the swing analysis (``app.swing``) on the saved keypoints
@@ -16,6 +18,7 @@ Smoothing, left-handed mirroring, phases and measurements live in
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,14 +27,23 @@ from typing import Callable
 import cv2
 import numpy as np
 
+from .club.detector import ClubDetector
 from .landmarks import LANDMARK_FIELDS, LANDMARK_NAMES
 from .pose.base import PoseDetection, PoseEstimator
 from .quality import FrameObservation, QualityReport, assess_quality
 from .swing import analyse_swing
+from .swing.phases import NoSwingFound, detect_phases
+from .swing.series import build_series
 from .video import VideoError, VideoMetadata, open_video, probe_video
 
 KEYPOINTS_FORMAT = "golfcoach.keypoints.v1"
 BRIGHTNESS_SAMPLE_EVERY = 10
+# Club detection runs from this long before the takeaway to this long after the finish.
+CLUB_LEAD_S = 1.0
+CLUB_TAIL_S = 0.3
+CLUB_PASS_START_PCT = 30  # progress when the club pass starts (it takes most of the time)
+
+log = logging.getLogger("cv.pipeline")
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -94,6 +106,75 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     os.replace(tmp, path)
 
 
+def _downscale(frame: np.ndarray, max_dim: int) -> np.ndarray:
+    h, w = frame.shape[:2]
+    scale = max_dim / max(h, w)
+    if scale >= 1.0:
+        return frame
+    return cv2.resize(frame, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+
+
+def club_frame_range(frames: list[dict], meta: VideoMetadata, camera_angle: str, handedness: str) -> tuple[int, int]:
+    """Inclusive frame range to run the club detector on: the swing found from the pose, plus margins.
+
+    From CLUB_LEAD_S before the takeaway (the address position, for the swing plane) to
+    CLUB_TAIL_S after the finish. Video time, so slow-motion clips get the same margins in frames
+    as they show on screen. Every frame when no swing is found: better slow than missing the club.
+    """
+    last = len(frames) - 1
+    payload = {
+        "frames": frames,
+        "video": {"width": meta.width, "height": meta.height, "fps": meta.fps},
+        "camera_angle": camera_angle,
+        "handedness": handedness,
+    }
+    try:
+        phases = detect_phases(build_series(payload))
+    except NoSwingFound:
+        return 0, last
+    except Exception:  # noqa: BLE001 - a bug here must not cost the club tracking
+        log.exception("Finding the swing for club tracking failed; checking every frame")
+        return 0, last
+    end_event = phases.frame("finish") if phases.frame("finish") is not None else phases.frame("impact")
+    start_t = frames[phases.frame("takeaway")]["t"] - CLUB_LEAD_S
+    end_t = frames[end_event]["t"] + CLUB_TAIL_S
+    first = next((k for k, f in enumerate(frames) if f["t"] >= start_t), 0)
+    end = max((k for k, f in enumerate(frames) if f["t"] <= end_t), default=last)
+    return first, end
+
+
+def _detect_club(
+    video_path: Path,
+    frames: list[dict],
+    club_frames: tuple[int, int],
+    detector: ClubDetector,
+    max_process_dim: int,
+    progress: ProgressCallback,
+) -> None:
+    """Second pass: add the best box per club part to the frames in ``club_frames`` (inclusive)."""
+    first, last = club_frames
+    stage = "Tracking the club"
+    progress(CLUB_PASS_START_PCT, stage)
+    cap = open_video(video_path)
+    try:
+        index = 0
+        while index <= last:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            if index >= first:
+                small = _downscale(frame, max_process_dim)
+                # Normalised [x1, y1, x2, y2, conf]; an absent part = checked but not found.
+                frames[index]["club"] = {part: box.to_list() for part, box in detector.detect(small).items()}
+                done = index - first + 1
+                if done % 5 == 0:
+                    share = done / (last - first + 1)
+                    progress(CLUB_PASS_START_PCT + int((94 - CLUB_PASS_START_PCT) * share), stage)
+            index += 1
+    finally:
+        cap.release()
+
+
 def run_pipeline(
     video_path: Path,
     keypoints_path: Path,
@@ -102,6 +183,7 @@ def run_pipeline(
     handedness: str,
     on_progress: ProgressCallback | None = None,
     max_process_dim: int = 1280,
+    club_detector: ClubDetector | None = None,
 ) -> PipelineOutput:
     def progress(pct: int, stage: str) -> None:
         if on_progress:
@@ -114,7 +196,11 @@ def run_pipeline(
             "The video is longer than 2 minutes. Trim it to the swing (a few seconds)."
         )
 
-    progress(4, "Detecting pose")
+    # Pose first, on every frame: it is fast, and it is how the swing is found. The club detector
+    # is about ten times slower per frame, so it only runs around the swing (second pass).
+    pose_end = CLUB_PASS_START_PCT if club_detector else 94
+    stage = "Detecting pose"
+    progress(4, stage)
     cap = open_video(video_path)
     observations: list[FrameObservation] = []
     frames_out: list[dict] = []
@@ -130,13 +216,7 @@ def run_pipeline(
                 break
             raw_ms.append(float(cap.get(cv2.CAP_PROP_POS_MSEC)))
 
-            h, w = frame.shape[:2]
-            scale = max_process_dim / max(h, w)
-            small = (
-                cv2.resize(frame, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
-                if scale < 1.0
-                else frame
-            )
+            small = _downscale(frame, max_process_dim)
 
             if index % BRIGHTNESS_SAMPLE_EVERY == 0:
                 gray = cv2.cvtColor(
@@ -152,17 +232,16 @@ def run_pipeline(
             lm = golfer.landmarks if golfer is not None else None
 
             observations.append(FrameObservation(n_poses=len(detections), landmarks=lm))
-            frames_out.append(
-                {
-                    "i": index,
-                    "n": len(detections),
-                    "lm": np.round(lm, 5).tolist() if lm is not None else None,
-                }
-            )
+            frame_out = {
+                "i": index,
+                "n": len(detections),
+                "lm": np.round(lm, 5).tolist() if lm is not None else None,
+            }
+            frames_out.append(frame_out)
             index += 1
 
             if index % 10 == 0:
-                progress(4 + int(90 * min(index / expected, 1.0)), "Detecting pose")
+                progress(4 + int((pose_end - 4) * min(index / expected, 1.0)), stage)
     finally:
         cap.release()
 
@@ -173,7 +252,12 @@ def run_pipeline(
     for frame_dict, t in zip(frames_out, times):
         frame_dict["t"] = round(t, 4)
         # keep "t" right after "i" for readability
-        frame_dict.update({k: frame_dict.pop(k) for k in ("n", "lm")})
+        frame_dict.update({k: frame_dict.pop(k) for k in ("n", "lm", "club") if k in frame_dict})
+
+    club_frames = None
+    if club_detector is not None:
+        club_frames = club_frame_range(frames_out, meta, camera_angle, handedness)
+        _detect_club(video_path, frames_out, club_frames, club_detector, max_process_dim, progress)
 
     progress(95, "Assessing video quality")
     quality = assess_quality(meta, observations, brightness)
@@ -182,6 +266,9 @@ def run_pipeline(
     payload = {
         "format": KEYPOINTS_FORMAT,
         "pose_model": estimator.name,
+        "club_model": club_detector.name if club_detector else None,
+        # Inclusive frame range the club detector ran on; frames outside it have no "club" key.
+        "club_frames": list(club_frames) if club_frames else None,
         "coordinate_space": "normalized_image",  # x,y in 0..1, origin top-left, as displayed
         "landmark_names": LANDMARK_NAMES,
         "landmark_fields": LANDMARK_FIELDS,

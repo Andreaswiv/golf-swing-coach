@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import logging
 
+from .club import build_club_series, measure_club
 from .feedback import build_feedback
 from .measurements import measure
 from .phases import PHASE_ORDER, NoSwingFound, detect_phases
-from .series import POLYORDER, build_series
+from .ratings import rate_measurements
+from .series import POLYORDER, build_series, rejected_landmarks
 
-SWING_ANALYSIS_VERSION = "swing-0.3"
+SWING_ANALYSIS_VERSION = "swing-0.5"
 
 log = logging.getLogger("cv.swing")
 
@@ -30,10 +32,13 @@ def analyse_swing(payload: dict) -> dict:
         "measurements": [],
         "notes": [],
         "feedback": None,
+        "club": {"tracked": False},
     }
     try:
         series = build_series(payload)
         result["smoothing"] = {"method": "savitzky_golay", "window_frames": series.window, "polyorder": POLYORDER}
+        # Joints dropped as impossible, per frame, so the player can leave them out too.
+        result["rejected_landmarks"] = rejected_landmarks(series)
         phases = detect_phases(series)
     except NoSwingFound as exc:
         result["status"] = "no_swing_found"
@@ -61,8 +66,14 @@ def analyse_swing(payload: dict) -> dict:
             )
     result["notes"].extend(phases.notes)
     try:
-        result["measurements"] = [m.to_dict() for m in measure(series, phases, payload.get("camera_angle", ""))]
-        result["feedback"] = build_feedback(result["measurements"], payload.get("camera_angle", ""), result["notes"])
+        angle = payload.get("camera_angle", "")
+        result["measurements"] = [m.to_dict() for m in measure(series, phases, angle)]
+        club = build_club_series(payload, series)
+        if club is not None:
+            club_measurements, result["club"] = measure_club(club, series, phases, angle)
+            result["measurements"] += [m.to_dict() for m in club_measurements]
+        result["feedback"] = build_feedback(result["measurements"], angle, result["notes"], result["club"])
+        rate_measurements(result["measurements"], result["club"])
     except Exception as exc:  # noqa: BLE001 - keep the phases even if a measurement breaks
         log.exception("Swing measurements failed")
         result["status"] = "error"

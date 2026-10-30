@@ -1,8 +1,14 @@
-import type { PhaseName, SwingAnalysis, SwingMeasurement } from "../api";
-import { PHASE_LABEL, confidenceLabel, formatMeasurement, measurementInfo } from "../swingLabels";
+import type { MomentName, Rating, SwingAnalysis, SwingMeasurement } from "../api";
+import { MOMENT_LABEL, RATING, confidenceLabel, formatMeasurement, measurementInfo } from "../swingLabels";
 import { ChevronRight } from "./icons";
 
-const GROUP_ORDER: (PhaseName | "timing")[] = ["timing", "address", "top", "impact"];
+const GROUP_ORDER: (MomentName | "timing")[] = ["timing", "address", "takeaway", "top", "downswing", "impact", "finish"];
+
+/** Known groups in swing order, then any the frontend does not know yet (never hide a measurement). */
+function orderedGroups(groups: Map<string, SwingMeasurement[]>): string[] {
+  const known: string[] = GROUP_ORDER;
+  return [...known.filter((g) => groups.has(g)), ...[...groups.keys()].filter((g) => !known.includes(g))];
+}
 
 interface Props {
   swing: SwingAnalysis;
@@ -16,6 +22,9 @@ export default function SwingResults({ swing, onSeek }: Props) {
     const key = m.unit === "s" || m.name === "tempo_ratio" ? "timing" : (m.phase ?? "timing");
     groups.set(key, [...(groups.get(key) ?? []), m]);
   }
+  const counts = (["good", "watch", "bad"] as Rating[])
+    .map((r) => ({ r, n: swing.measurements.filter((m) => m.rating === r).length }))
+    .filter((c) => c.n > 0);
 
   return (
     <details className="card group" open={swing.feedback ? undefined : true}>
@@ -25,6 +34,16 @@ export default function SwingResults({ swing, onSeek }: Props) {
             Measurements
           </h2>
           <span className="text-sm text-mute">The numbers behind the feedback</span>
+          {counts.length > 0 && (
+            <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-mute">
+              {counts.map(({ r, n }) => (
+                <span key={r} className="flex items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full ${RATING[r].dot}`} />
+                  {n} {RATING[r].text.toLowerCase()}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
         <ChevronRight className="h-5 w-5 text-mute transition-transform group-open:rotate-90" />
       </summary>
@@ -35,6 +54,8 @@ export default function SwingResults({ swing, onSeek }: Props) {
           share of your torso length, so camera distance does not matter.
           {swing.mirrored_for_left_handed && " Left-handed swings are mirrored, so “lead” means your right side."}{" "}
           Select a row to see that moment.
+          {counts.length > 0 &&
+            " Green is within what good swings show, yellow is slightly off, red is clearly off. Grey values are context only, or too uncertain to judge."}
         </p>
 
         {swing.notes.length > 0 && (
@@ -53,27 +74,40 @@ export default function SwingResults({ swing, onSeek }: Props) {
           </p>
         )}
 
-        {GROUP_ORDER.filter((g) => groups.has(g)).map((g) => (
+        {orderedGroups(groups).map((g) => (
           <div key={g}>
-            <h3 className="text-sm font-semibold text-mute">{g === "timing" ? "Timing" : PHASE_LABEL[g as PhaseName]}</h3>
+            <h3 className="text-sm font-semibold text-mute">{g === "timing" ? "Timing" : (MOMENT_LABEL[g as MomentName] ?? g)}</h3>
             <ul className="mt-2 divide-y divide-line overflow-hidden rounded-xl border border-line">
               {groups.get(g)!.map((m) => {
                 const info = measurementInfo(m.name);
                 const conf = confidenceLabel(m.confidence);
+                const rating = m.rating ? RATING[m.rating] : null;
+                // Older results have no rating: keep the old look (grey only when uncertain).
+                const valueCls = rating ? rating.value : m.rating === undefined && m.confidence >= 0.5 ? "" : "text-mute";
                 return (
                   <li key={m.name}>
                     <button
                       onClick={() => onSeek(m.frame_index)}
-                      className="grid w-full grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 px-4 py-3 text-left transition-colors hover:bg-canvas"
+                      className="grid w-full grid-cols-[1fr_auto] gap-x-4 gap-y-1 px-4 py-3 text-left transition-colors hover:bg-canvas"
                     >
                       <span className="font-medium">{info.label}</span>
-                      <span className={`tnum text-right font-semibold ${m.confidence < 0.5 ? "text-mute" : ""}`}>
+                      <span className={`tnum text-right text-lg font-semibold leading-tight ${valueCls}`}>
                         {formatMeasurement(m)}
                       </span>
-                      <span className="text-sm text-mute">{info.meaning}</span>
-                      <span className="text-right text-xs">
-                        <span className={conf.cls}>{conf.text}</span>
-                        <span className="text-mute"> · {m.type === "measured" ? "Measured" : "Estimated"}</span>
+                      <span className="text-sm text-mute">
+                        {info.meaning}
+                        {m.typical && (
+                          <span className="mt-0.5 block text-ink/80">Good swings: {m.typical}</span>
+                        )}
+                      </span>
+                      <span className="flex flex-col items-end gap-1 text-right text-xs">
+                        {rating && (
+                          <span className={`rounded-full px-2 py-0.5 font-semibold ${rating.pill}`}>{rating.text}</span>
+                        )}
+                        <span className="text-mute">
+                          <span className={m.confidence < 0.5 ? conf.cls : ""}>{conf.text}</span> ·{" "}
+                          {m.type === "measured" ? "Measured" : "Estimated"}
+                        </span>
                       </span>
                     </button>
                   </li>

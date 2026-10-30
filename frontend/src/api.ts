@@ -21,6 +21,8 @@ export interface QualityReport {
 
 /** Swing analysis from the Python service (cv-service/app/swing); keys are snake_case on purpose. */
 export type PhaseName = "address" | "takeaway" | "top" | "impact" | "finish";
+/** A phase, or the stretch between top and impact (club measurements are taken halfway down). */
+export type MomentName = PhaseName | "downswing";
 
 export interface SwingPhase {
   name: PhaseName;
@@ -32,13 +34,19 @@ export interface SwingPhase {
 
 export interface SwingMeasurement {
   name: string;
-  phase: PhaseName | null;
+  phase: MomentName | null;
   frame_index: number;
   value: number;
   unit: string;
   type: "measured" | "estimated";
   confidence: number;
+  /** Traffic light from the feedback limits (swing-0.5+); null = no judgement (context, or too uncertain). */
+  rating?: Rating | null;
+  /** What good swings show, in words. */
+  typical?: string | null;
 }
+
+export type Rating = "good" | "watch" | "bad";
 
 export interface SwingFinding {
   code: string;
@@ -47,7 +55,7 @@ export interface SwingFinding {
   detail: string;
   why: string | null;
   drill: string | null;
-  phase: PhaseName | null;
+  phase: MomentName | null;
   frame_index: number | null;
   confidence: number;
   measurements: string[];
@@ -57,6 +65,34 @@ export interface SwingFeedback {
   summary: string;
   findings: SwingFinding[];
   not_checked: string[];
+}
+
+/** Point in normalised image coordinates (0..1 of the video frame, not mirrored). */
+export type ImagePoint = [number, number];
+
+export type ClubTrackPoint = [number, number, number, number, 0 | 1];
+
+/** Club tracking summary (cv-service/app/swing/club.py). */
+export interface ClubSummary {
+  /** False when the video was processed without the club detector. */
+  tracked: boolean;
+  /** Share of frames (0..1) where each part was found. */
+  found_share?: { shaft: number; head: number; hands: number };
+  /** Frames the club detector looked at (it only runs around the swing), out of all frames. */
+  frames_checked?: number;
+  frames_total?: number;
+  /** Swing plane: the address shaft line from the ball through the grip, extended. Down-the-line only. */
+  plane?: { from: ImagePoint; to: ImagePoint } | null;
+  /** Frames where a club detection was thrown out as physically impossible. */
+  rejected_frames?: number;
+  /**
+   * The club as the analysis used it, per frame (index = frame index): [grip x, grip y, head x,
+   * head y, 1 if the head was detected / 0 if inferred], normalised, or null for no club. Detections
+   * that cannot be real are already removed. Absent before swing-0.5.
+   */
+  track?: (ClubTrackPoint | null)[];
+  /** Toes relative to the ball in % torso; negative = between the ball and the golfer. */
+  toes_from_ball?: number | null;
 }
 
 export interface SwingAnalysis {
@@ -70,6 +106,10 @@ export interface SwingAnalysis {
   notes: { code: string; message: string }[];
   /** Absent in results from swing-0.1 (re-run the analysis to get it). */
   feedback?: SwingFeedback | null;
+  /** Absent before swing-0.4. */
+  club?: ClubSummary;
+  /** Frames where each joint (raw landmark name) was dropped as impossible. Absent before swing-0.5. */
+  rejected_landmarks?: Record<string, number[]>;
 }
 
 export interface VideoInfo {

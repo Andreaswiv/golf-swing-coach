@@ -9,6 +9,7 @@ const STAGES = [
   "Queued",
   "Reading video",
   "Detecting pose",
+  "Tracking the club",
   "Assessing video quality",
   "Saving keypoints",
   "Analysing swing",
@@ -19,15 +20,21 @@ const STAGE_LABEL: Record<string, string> = {
   Queued: "Waiting to start",
   "Reading video": "Reading the video",
   "Detecting pose": "Finding your joints in every frame",
+  "Tracking the club": "Finding the club around your swing",
   "Assessing video quality": "Checking video quality",
   "Saving keypoints": "Saving results",
   "Analysing swing": "Analysing your swing",
   Completed: "Done",
 };
 
+// Stage names that mean the same step as one in STAGES.
+const STAGE_ALIAS: Record<string, string> = {
+  "Detecting pose and club": "Detecting pose",
+};
+
 function stageIndex(a: Analysis): number {
   if (a.status === "completed") return STAGES.length - 1;
-  const i = STAGES.indexOf(a.stage);
+  const i = STAGES.indexOf(STAGE_ALIAS[a.stage] ?? a.stage);
   return i >= 0 ? i : a.status === "queued" ? 0 : 1; // "Starting" etc. count as reading the video
 }
 
