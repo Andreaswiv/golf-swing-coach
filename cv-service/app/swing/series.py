@@ -5,8 +5,14 @@ Steps, in order:
      the frame's aspect ratio (a 360x640 portrait clip squashes x otherwise).
   2. Mirror left-handed golfers (flip x and swap left/right landmarks), so all
      later code can assume a right-handed swing: lead side = "left".
-  3. Fill short gaps where nobody was detected by linear interpolation.
-  4. Smooth with a Savitzky-Golay filter. It keeps peaks (top of backswing,
+  3. Drop detection glitches: a joint that jumps away and comes straight back
+     within about 0.05 s (MediaPipe sometimes puts a hidden wrist somewhere
+     else for a few frames, with high visibility). Real body parts cannot do
+     that, and one glitch can look faster than the real downswing.
+     Also drop a joint where its limb gets impossibly long: on video a forearm or
+     shin can look shorter (pointing at the camera) but never longer than it is.
+  4. Fill short gaps (no detection, or a dropped glitch) by linear interpolation.
+  5. Smooth with a Savitzky-Golay filter. It keeps peaks (top of backswing,
      impact) sharper than a moving average of the same width.
 
 Visibility is kept raw. Interpolated frames keep visibility 0, so anything
@@ -23,6 +29,24 @@ from ..landmarks import LANDMARK_INDEX, LANDMARK_NAMES
 
 MAX_GAP_FRAMES = 6
 POLYORDER = 2
+# Glitch = a joint leaves by at least SPIKE_MIN_JUMP torso lengths and is back within SPIKE_RETURN
+# of where it left, all within SPIKE_MAX_S. At impact the hands also move fast, but they do not
+# come back to the same place 0.05 s later.
+SPIKE_MAX_S = 0.05
+SPIKE_MIN_JUMP = 0.25
+SPIKE_RETURN = 0.1
+# (parent, child): the child is dropped when the limb between them is more than MAX_BONE_FACTOR
+# times its usual length in this clip. Ordered from the body outward, so a dropped elbow is not
+# also used to judge the wrist.
+BONES = [
+    ("left_shoulder", "left_elbow"), ("right_shoulder", "right_elbow"),
+    ("left_elbow", "left_wrist"), ("right_elbow", "right_wrist"),
+    ("left_hip", "left_knee"), ("right_hip", "right_knee"),
+    ("left_knee", "left_ankle"), ("right_knee", "right_ankle"),
+    ("left_ankle", "left_heel"), ("right_ankle", "right_heel"),
+    ("left_ankle", "left_foot_index"), ("right_ankle", "right_foot_index"),
+]
+MAX_BONE_FACTOR = 1.4  # the "usual" length is the 90th percentile, so this leaves room for noise
 
 
 @dataclass
@@ -35,6 +59,7 @@ class Series:
     fps: float
     mirrored: bool
     window: int  # smoothing window in frames
+    rejected: np.ndarray  # (F, 33) bool: detection dropped as impossible (a glitch or an over-long limb)
 
     @property
     def frame_count(self) -> int:
@@ -86,13 +111,90 @@ def build_series(payload: dict) -> Series:
         perm = mirror_permutation()
         xy, vis = xy[:, perm], vis[:, perm]
 
+    rejected = np.zeros(vis.shape, dtype=bool)
+    scale = _raw_torso_length(xy)
+    if scale is not None:
+        max_len = max(1, int(round(fps * SPIKE_MAX_S)))
+        for j in range(xy.shape[1]):
+            rejected[:, j] = find_spikes(xy[:, j], max_len, SPIKE_MIN_JUMP * scale, SPIKE_RETURN * scale)
+        xy[rejected] = np.nan
+        for parent, child in BONES:
+            a, b = LANDMARK_INDEX[parent], LANDMARK_INDEX[child]
+            too_long = overlong_bone(xy[:, a], xy[:, b])
+            xy[too_long, b] = np.nan
+            rejected[too_long, b] = True
+        vis[rejected] = 0.0
+
     window = smoothing_window(fps)
     for j in range(xy.shape[1]):
         for c in range(2):
             xy[:, j, c] = savgol_runs(fill_gaps(xy[:, j, c], MAX_GAP_FRAMES), window, POLYORDER)
 
     t = np.array([float(f["t"]) for f in frames])
-    return Series(t=t, xy=xy, vis=vis, width=width, height=height, fps=fps, mirrored=mirrored, window=window)
+    return Series(
+        t=t, xy=xy, vis=vis, width=width, height=height, fps=fps, mirrored=mirrored, window=window, rejected=rejected
+    )
+
+
+def rejected_landmarks(s: Series) -> dict[str, list[int]]:
+    """Frames where each landmark was dropped, by its name in the RAW keypoints (mirroring undone)."""
+    perm = mirror_permutation() if s.mirrored else np.arange(len(LANDMARK_NAMES))
+    out: dict[str, list[int]] = {}
+    for j in range(s.rejected.shape[1]):
+        frames = np.flatnonzero(s.rejected[:, j])
+        if len(frames):
+            out[LANDMARK_NAMES[perm[j]]] = [int(f) for f in frames]
+    return out
+
+
+def _raw_torso_length(xy: np.ndarray) -> float | None:
+    """Median shoulder-centre to hip-centre distance in px, before smoothing; None if unknown."""
+    shoulders = (xy[:, LANDMARK_INDEX["left_shoulder"]] + xy[:, LANDMARK_INDEX["right_shoulder"]]) / 2
+    hips = (xy[:, LANDMARK_INDEX["left_hip"]] + xy[:, LANDMARK_INDEX["right_hip"]]) / 2
+    lengths = np.linalg.norm(shoulders - hips, axis=1)
+    lengths = lengths[~np.isnan(lengths)]
+    return float(np.median(lengths)) if len(lengths) and np.median(lengths) > 1 else None
+
+
+def overlong_bone(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Frames where the segment a-b is more than MAX_BONE_FACTOR times its usual (90th percentile) length."""
+    lengths = np.linalg.norm(b - a, axis=1)
+    known = ~np.isnan(lengths)
+    if known.sum() < 10:
+        return np.zeros(len(a), dtype=bool)
+    usual = np.percentile(lengths[known], 90)
+    with np.errstate(invalid="ignore"):
+        return known & (lengths > MAX_BONE_FACTOR * usual)
+
+
+def find_spikes(p: np.ndarray, max_len: int, min_jump: float, max_return: float) -> np.ndarray:
+    """Frames where a point jumps away and comes back within ``max_len`` frames.
+
+    ``p``: (F, 2) positions, NaN where unknown. A run of 1..max_len frames is a spike when the
+    frames on either side are within ``max_return`` of each other and some frame in the run is at
+    least ``min_jump`` away from both of them. Returns a boolean mask.
+    """
+    n = len(p)
+    out = np.zeros(n, dtype=bool)
+    known = ~np.isnan(p[:, 0])
+    for a in range(n - 2):
+        if not known[a]:
+            continue
+        for length in range(1, max_len + 1):
+            b = a + length + 1
+            if b >= n:
+                break
+            if not known[b] or np.hypot(*(p[b] - p[a])) > max_return:
+                continue
+            run = p[a + 1 : b]
+            ok = ~np.isnan(run[:, 0])
+            if not ok.any():
+                continue
+            away = np.minimum(np.hypot(*(run[ok] - p[a]).T), np.hypot(*(run[ok] - p[b]).T))
+            if away.max() >= min_jump:
+                out[a + 1 : b] = True
+                break
+    return out
 
 
 def fill_gaps(y: np.ndarray, max_gap: int) -> np.ndarray:

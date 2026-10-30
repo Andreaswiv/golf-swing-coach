@@ -36,6 +36,17 @@ SWAY = (8.0, 15.0)  # % torso away from the target at the top
 LEAD_ARM_BEND = (20.0, 35.0)  # degrees of bend at the top
 STANCE_RANGE = (0.85, 1.6)  # ankle distance / shoulder width
 TEMPO_RANGE = (2.3, 4.0)  # backswing : downswing
+# Club (down-the-line). Shaft pointing beyond the ball halfway down (% torso; 40% ~ 20 cm).
+SHAFT_OUTSIDE = (40.0, 80.0)
+# Praise only up to here (% torso beyond the ball). Good downswings point between the toes and the
+# ball (tour swings measured -10 and -21); from here up to SHAFT_OUTSIDE there is no verdict.
+ON_PLANE_MAX = 15.0
+HAND_PATH_OUTSIDE = (10.0, 20.0)  # downswing hands outside the backswing path (% torso)
+# Downswing hands under the backswing path (% torso). Slightly inside is normal and good (a tour swing
+# measured 0); this is well past that.
+HAND_PATH_INSIDE = (12.0, 22.0)
+SHAFT_INSIDE_TOES_CLEAR = 40.0  # % torso the shaft points inside the toes before it is a clear fault
+PAST_PARALLEL = 15.0  # degrees past parallel at the top (face-on) before it counts as an overswing
 
 
 @dataclass
@@ -67,8 +78,9 @@ def _issue_kind(clear: bool, confidence: float) -> str:
 
 
 class _Rules:
-    def __init__(self, measurements: list[dict]) -> None:
+    def __init__(self, measurements: list[dict], club: dict | None = None) -> None:
         self.m = {x["name"]: x for x in measurements}
+        self.club = club or {}
         self.out: list[Finding] = []
 
     def get(self, *names: str) -> list[dict] | None:
@@ -332,6 +344,112 @@ class _Rules:
                 drill=None,
             )
 
+    # ---- club --------------------------------------------------------------------------
+    def club_plane(self):
+        # Either measurement can be missing: the shaft check needs a few sharp frames halfway down,
+        # which a fast downswing filmed at 60 fps may not have.
+        shaft = self.m.get("shaft_points_downswing")
+        path = self.m.get("hand_path_downswing")
+        if not shaft and not path:
+            return
+        v = shaft["value"] if shaft else None
+        loop = path["value"] if path else None
+        toes = self.club.get("toes_from_ball")
+        steep = v is not None and v > SHAFT_OUTSIDE[0]
+        outside_path = loop is not None and loop > HAND_PATH_OUTSIDE[0]
+        inside_shaft = v is not None and toes is not None and v < toes
+        inside_path = loop is not None and loop < -HAND_PATH_INSIDE[0]
+        if steep or outside_path:
+            parts, used = [], []
+            if steep:
+                parts.append(f"halfway down, your shaft points beyond the ball by {_cm(v)}")
+                used.append(shaft)
+            if outside_path:
+                parts.append(f"your hands come down {_cm(loop)} outside the path they went back on")
+                used.append(path)
+            clear = (v is not None and v > SHAFT_OUTSIDE[1]) or (loop is not None and loop > HAND_PATH_OUTSIDE[1])
+            self.add(
+                "over_the_top", _issue_kind(clear, min(x["confidence"] for x in used)),
+                "Your club comes down over the top",
+                "Seen from behind: " + " and ".join(parts) + ". In a good downswing the shaft points between "
+                "your toes and the ball at that point, and the hands drop slightly inside their backswing path.",
+                "your club comes down over the top (steep, outside the swing plane)", used,
+                why="When the club comes down steep and outside, it swings across the ball from out to in. That "
+                "is the classic cause of slices and pulls, and of divots that point left.",
+                drill="Put a headcover or towel just outside the ball, on the far side. Make slow swings that "
+                "miss it: start the downswing by turning your hips while your arms and club drop down behind "
+                "you, then swing out toward right field (left field if you are left-handed).",
+            )
+        elif inside_shaft or inside_path:
+            parts, used = [], []
+            if inside_shaft:
+                parts.append(f"halfway down, your shaft points inside your toes, {_cm(v)} inside the ball")
+                used.append(shaft)
+            if inside_path:
+                parts.append(f"your hands drop {_cm(loop)} inside (under) the path they went back on")
+                used.append(path)
+            clear = (inside_shaft and v < toes - SHAFT_INSIDE_TOES_CLEAR) or (
+                inside_path and loop < -HAND_PATH_INSIDE[1]
+            )
+            self.add(
+                "inside_out", _issue_kind(clear, min(x["confidence"] for x in used)),
+                "Your club comes from too far inside",
+                "Seen from behind: " + " and ".join(parts) + ". Dropping the club slightly inside is good, "
+                "but this much makes it swing at the ball from the inside out.",
+                "your club comes from too far inside (inside-out)", used,
+                why="A club that comes from too far inside swings out to the right through impact (left for "
+                "left-handers). That causes pushes and hooks, and thin or fat contact when the low point moves.",
+                drill="Feel your arms stay more in front of your chest as you start down, and your chest keep "
+                "turning through impact, so the club works down the same line it went back on. A headcover "
+                "just inside the ball, on your side, punishes swings that come from too far inside.",
+            )
+        elif v is not None and v <= ON_PLANE_MAX:
+            if v >= 0:
+                where = "just beyond the ball"
+            elif toes is not None:
+                where = "between your toes and the ball"
+            else:
+                where = "inside the ball"
+            used = [shaft] + ([path] if path else [])
+            self.add(
+                "on_plane", "strength", "Your club comes down on plane",
+                f"Halfway down, your shaft points {where}: {_cm(v)} {'inside' if v < 0 else 'beyond'} the ball."
+                + (" Your hands come down on or slightly inside the path they went back on." if path else "")
+                + " That is what good downswings look like from behind.",
+                "your club comes down on plane", used,
+            )
+        elif v is None and loop <= 3:
+            self.add(
+                "on_plane", "strength", "Your hands come down on plane",
+                f"Your hands come down {'on' if loop > -3 else 'slightly inside'} the path they went back on. (Where the shaft points halfway down could not be measured: the club "
+                "is too blurred in those frames. Slow motion would help.)",
+                "your hands come down on plane", [path],
+            )
+
+    def backswing_length(self):
+        found = self.get("shaft_past_parallel_top")
+        if not found:
+            return
+        (top,) = found
+        v = top["value"]
+        if v > PAST_PARALLEL:
+            self.add(
+                "overswing", "watch", "Your backswing goes past parallel",
+                f"At the top, the shaft is about {v:.0f}° past parallel to the ground. Past parallel is not "
+                "wrong in itself, but it is often a sign of a collapsing lead arm or a lifted lead heel.",
+                "your backswing goes past parallel", [top],
+                why="A very long backswing is harder to time and often costs consistency more than it adds speed.",
+                drill="Make swings where you stop when the shaft is parallel to the ground, keeping your lead "
+                "arm extended; a three-quarter feel is usually closer to parallel than you think.",
+            )
+        elif v > -45:
+            self.add(
+                "controlled_length", "strength", "Controlled backswing length",
+                f"At the top, the shaft is {'about parallel to' if abs(v) < 8 else ('about %.0f° short of' % -v if v < 0 else 'about %.0f° past' % v)} "
+                "the ground.",
+                "your backswing length is controlled", [top],
+            )
+
     # ---- timing --------------------------------------------------------------------------
     def tempo(self):
         found = self.get("tempo_ratio")
@@ -370,24 +488,26 @@ class _Rules:
 ORDER = {"improve": 0, "watch": 1, "strength": 2}
 
 
-def build_feedback(measurements: list[dict], camera_angle: str, notes: list[dict]) -> dict:
-    rules = _Rules(measurements)
+def build_feedback(measurements: list[dict], camera_angle: str, notes: list[dict], club: dict | None = None) -> dict:
+    rules = _Rules(measurements, club)
     if camera_angle == "down_the_line":
         rules.setup_posture()
         rules.posture_through_impact()
         rules.head_height()
+        rules.club_plane()
     elif camera_angle == "face_on":
         rules.sway()
         rules.weight_shift()
         rules.lead_arm()
         rules.stance()
+        rules.backswing_length()
     rules.tempo()
 
     findings = sorted(rules.out, key=lambda f: (ORDER[f.kind], -f.confidence))
     return {
         "summary": _summary(findings),
         "findings": [f.to_dict() for f in findings],
-        "not_checked": _not_checked(camera_angle, notes),
+        "not_checked": _not_checked(camera_angle, notes, club),
     }
 
 
@@ -418,7 +538,7 @@ def _summary(findings: list[Finding]) -> str:
     return " ".join(parts)
 
 
-def _not_checked(camera_angle: str, notes: list[dict]) -> list[str]:
+def _not_checked(camera_angle: str, notes: list[dict], club: dict | None = None) -> list[str]:
     items = []
     if any(n["code"] == "slow_motion_suspected" for n in notes):
         items.append("Tempo: the clip seems to be slow motion, so timing could not be judged.")
@@ -429,5 +549,16 @@ def _not_checked(camera_angle: str, notes: list[dict]) -> list[str]:
             "Posture changes toward the ball (early extension) can't be seen from the front. "
             "Film down-the-line to check them."
         )
-    items.append("The club is not tracked, so club path, face angle and swing plane are not judged.")
+    if club and club.get("tracked"):
+        if camera_angle == "face_on":
+            items.append("The swing plane is judged from behind. Film down-the-line to check over-the-top moves.")
+        items.append(
+            "Club path and face angle at impact in degrees can't be measured from phone video; the club head "
+            "is a blur at impact. A launch monitor measures those."
+        )
+    else:
+        items.append(
+            "The club was not tracked for this video, so the swing plane and over-the-top moves are not judged. "
+            "Process the video again to add club tracking."
+        )
     return items

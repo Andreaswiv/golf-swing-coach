@@ -45,6 +45,30 @@ export const UploadIcon = (p: P) => (
     <path d="M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" />
   </Icon>
 );
+export const PlayIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M7 4.5v15l12-7.5z" fill="currentColor" />
+  </Icon>
+);
+
+export const PauseIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M8 5v14M16 5v14" strokeWidth={3} />
+  </Icon>
+);
+
+export const ExpandIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+  </Icon>
+);
+
+export const ShrinkIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+  </Icon>
+);
+
 export const ChevronLeft = (p: P) => (
   <Icon {...p}>
     <path d="M15 5l-7 7 7 7" />

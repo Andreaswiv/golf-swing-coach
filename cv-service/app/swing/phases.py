@@ -5,7 +5,10 @@ hip-centre distance), never in seconds or pixels. That keeps them independent
 of the frame rate, of slow-motion exports and of how big the golfer is.
 
   1. Downswing anchor: the frame where the hands move down fastest. Waggles
-     and practice moves are slower, so this finds the real swing.
+     and practice moves are slower, so this finds the real swing. If that
+     does not lead to a believable swing (too small, or the hands rose to the
+     "top" faster than any real backswing: a leftover detection glitch), the
+     next-fastest downward movement is tried.
   2. Impact: the lowest hand position just after that anchor.
   3. Top: the end of the highest hand position before it. If the golfer pauses
      at the top, this is the moment the hands start down, not the start of the
@@ -38,6 +41,10 @@ MIN_ADDRESS_FRAMES = 5  # the address position must be held at least this many f
 FINISH_TOLERANCE = 0.05  # torso lengths below the highest follow-through point
 TOP_PAUSE_TOLERANCE = 0.05  # torso lengths: still "at the top" within this of the highest point
 SLOW_MOTION_DOWNSWING_S = 0.6  # real downswings take roughly 0.25-0.45 s
+# The hands' rise from near impact height to the top takes well over 0.3 s in real backswings
+# (slow motion only makes it longer). Faster than this is a detection glitch, not a swing.
+MIN_BACKSWING_RISE_S = 0.2
+MAX_ANCHOR_CANDIDATES = 10
 
 PHASE_ORDER = ["address", "takeaway", "top", "impact", "finish"]
 
@@ -91,6 +98,43 @@ def hand_visibility_score(s: Series, frame: int) -> float:
     return float(np.clip((best.mean() - 0.3) / 0.5, 0.0, 1.0))
 
 
+def _anchor_candidates(vy: np.ndarray) -> list[int]:
+    """Peaks of downward hand speed, fastest first."""
+    n = len(vy)
+    peaks = [f for f in range(n) if vy[f] > 0 and (f == 0 or vy[f] >= vy[f - 1]) and (f == n - 1 or vy[f] > vy[f + 1])]
+    return sorted(peaks, key=lambda f: -vy[f])[:MAX_ANCHOR_CANDIDATES]
+
+
+def _swing_from_anchor(hy: np.ndarray, t: np.ndarray, anchor: int) -> tuple[int, int, int] | None:
+    """(impact, highest, top) for the downswing through ``anchor``, or None if it is not a believable swing."""
+    n = len(hy)
+    # Impact: lowest hands between the anchor and the moment the hands come back up past
+    # anchor height in the follow-through. Region searches, not slope following: at 30 fps
+    # the hands jitter around the turning points and a slope walk stops too early.
+    k = anchor + 1
+    while k < n and hy[k] > hy[anchor]:
+        k += 1
+    impact = anchor + int(np.argmax(hy[anchor:k]))
+
+    # Top: highest hands between the anchor and the last earlier frame where the hands were
+    # back down near impact height (the start of this swing, not an earlier practice swing).
+    near_impact = hy[impact] - 0.25 * (hy[impact] - hy[anchor])
+    k = anchor
+    while k > 0 and hy[k] < near_impact:
+        k -= 1
+    highest = k + int(np.argmin(hy[k : anchor + 1]))
+    top = highest
+    while top + 1 < anchor and hy[top + 1] <= hy[highest] + TOP_PAUSE_TOLERANCE:
+        top += 1
+
+    if hy[impact] - hy[top] < MIN_SWING_RANGE or not top < anchor <= impact:
+        return None
+    # k == 0: the clip starts mid-backswing, so the rise time is unknown, not short.
+    if k > 0 and t[highest] - t[k] < MIN_BACKSWING_RISE_S:
+        return None
+    return impact, highest, top
+
+
 def detect_phases(s: Series) -> Phases:
     if s.frame_count < 10:
         raise NoSwingFound("The clip is too short to contain a swing.")
@@ -106,32 +150,17 @@ def detect_phases(s: Series) -> Phases:
     hy = np.interp(idx, idx[known], hands[known, 1]) / torso
 
     vy = np.gradient(hy)  # positive = hands moving down (image y grows downward)
-    anchor = int(np.argmax(vy))
-
-    # Impact: lowest hands between the anchor and the moment the hands come back up past
-    # anchor height in the follow-through. Region searches, not slope following: at 30 fps
-    # the hands jitter around the turning points and a slope walk stops too early.
-    k = anchor + 1
-    while k < s.frame_count and hy[k] > hy[anchor]:
-        k += 1
-    impact = anchor + int(np.argmax(hy[anchor:k]))
-
-    # Top: highest hands between the anchor and the last earlier frame where the hands were
-    # back down near impact height (the start of this swing, not an earlier practice swing).
-    near_impact = hy[impact] - 0.25 * (hy[impact] - hy[anchor])
-    k = anchor
-    while k > 0 and hy[k] < near_impact:
-        k -= 1
-    highest = k + int(np.argmin(hy[k : anchor + 1]))
-    top = highest
-    while top + 1 < anchor and hy[top + 1] <= hy[highest] + TOP_PAUSE_TOLERANCE:
-        top += 1
-
-    swing_range = hy[impact] - hy[top]
-    if swing_range < MIN_SWING_RANGE or not top < anchor <= impact:
+    found = None
+    for anchor in _anchor_candidates(vy):
+        found = _swing_from_anchor(hy, s.t, anchor)
+        if found is not None:
+            break
+    if found is None:
         raise NoSwingFound(
             "No full swing was found: the hands never rose clearly above impact height before a fast downswing."
         )
+    impact, highest, top = found
+    swing_range = hy[impact] - hy[top]
 
     notes: list[dict] = []
     low_band = hy[top] + 0.7 * swing_range
