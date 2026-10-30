@@ -1,0 +1,34 @@
+# Secrets / local config
+.env
+
+# Personal data: never commit videos or keypoints
+data/videos/*
+data/keypoints/*
+!data/videos/.gitkeep
+!data/keypoints/.gitkeep
+
+# Downloaded model files
+cv-service/models/*
+!cv-service/models/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+frontend/dist/
+.vite/
+
+# .NET
+bin/
+obj/
+*.user
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

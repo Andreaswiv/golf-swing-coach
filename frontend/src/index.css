@@ -1,0 +1,158 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces and text */
+  --color-canvas: #f3f4ef;
+  --color-surface: #ffffff;
+  --color-subtle: #eceee6;
+  --color-line: #dfe3d8;
+  --color-ink: #16201a;
+  --color-mute: #5b675e;
+
+  /* Brand: fairway green */
+  --color-brand: #1d6a43;
+  --color-brand-deep: #134a2e;
+  --color-brand-soft: #e2efe6;
+
+  /* Feedback tones */
+  --color-good: #1c7f47;
+  --color-good-soft: #e3f3e8;
+  --color-warn: #a86b12;
+  --color-warn-soft: #fbf0d9;
+  --color-bad: #b9432a;
+  --color-bad-soft: #fbe6df;
+
+  /* Skeleton on video (must stand out on grass and sky) */
+  --color-left: #4aa3df;
+  --color-right: #f0b93a;
+
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --shadow-card: 0 1px 2px rgb(22 32 26 / 0.04), 0 4px 16px rgb(22 32 26 / 0.06);
+}
+
+html {
+  background: var(--color-canvas);
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---- shared building blocks ---------------------------------------------------------------- */
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 10px;
+  padding: 0.6rem 1.1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--color-brand);
+  color: white;
+}
+.btn-primary:not(:disabled):hover {
+  background: var(--color-brand-deep);
+}
+.btn-secondary {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+}
+.btn-secondary:not(:disabled):hover {
+  border-color: var(--color-mute);
+}
+.btn-quiet {
+  color: var(--color-mute);
+  padding: 0.4rem 0.6rem;
+  font-weight: 500;
+}
+.btn-quiet:hover {
+  color: var(--color-ink);
+  background: var(--color-subtle);
+}
+
+.link {
+  color: var(--color-brand);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--color-brand) 35%, transparent);
+}
+.link:hover {
+  text-decoration-color: var(--color-brand);
+}
+
+/* Segmented control: a row of options where one is selected */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--color-subtle);
+  border-radius: 10px;
+}
+.seg > button,
+.seg > label {
+  border-radius: 8px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.875rem;
+  color: var(--color-mute);
+  cursor: pointer;
+}
+.seg > [aria-pressed="true"],
+.seg > label:has(input:checked) {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(22 32 26 / 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

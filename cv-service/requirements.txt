@@ -1,0 +1,6 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30
+pydantic>=2.7
+numpy>=1.26
+# mediapipe pulls in opencv-contrib-python (provides cv2); do not add a second OpenCV package.
+mediapipe>=0.10.21

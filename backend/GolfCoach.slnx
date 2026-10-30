@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="GolfCoach.Api/GolfCoach.Api.csproj" />
+  <Project Path="GolfCoach.Api.Tests/GolfCoach.Api.Tests.csproj" />
+</Solution>
