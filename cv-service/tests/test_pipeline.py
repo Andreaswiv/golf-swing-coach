@@ -108,3 +108,15 @@ def test_pipeline_flags_multiple_people(tmp_path):
     estimator = FakeEstimator(plan=lambda i: [make_landmarks(0.3), make_landmarks(0.7, scale=0.5)])
     result = run_pipeline(video, tmp_path / "k.json", estimator, "face_on", "right")
     assert any(w.code == "multiple_people" for w in result.quality.warnings)
+
+
+def test_pipeline_rejects_videos_longer_than_15_seconds(tmp_path, fake_estimator):
+    video = write_test_video(tmp_path / "long", frames=16 * 5, fps=5.0)  # 16 s
+    with pytest.raises(VideoError, match="16.0 seconds long. The limit is 15 seconds"):
+        run_pipeline(video, tmp_path / "k.json", fake_estimator, "down_the_line", "right")
+    assert not (tmp_path / "k.json").exists()
+
+
+def test_pipeline_accepts_a_15_second_video(tmp_path, fake_estimator):
+    video = write_test_video(tmp_path / "ok", frames=15 * 5, fps=5.0)
+    run_pipeline(video, tmp_path / "k.json", fake_estimator, "down_the_line", "right")

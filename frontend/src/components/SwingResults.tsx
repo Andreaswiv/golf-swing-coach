@@ -1,6 +1,10 @@
 import type { MomentName, Rating, SwingAnalysis, SwingMeasurement } from "../api";
-import { MOMENT_LABEL, RATING, confidenceLabel, formatMeasurement, measurementInfo } from "../swingLabels";
+import { MOMENT_LABEL, RATING, formatMeasurement, measurementInfo } from "../swingLabels";
 import { ChevronRight } from "./icons";
+import InfoTip from "./InfoTip";
+
+/** Below this the value is shown with a "Low confidence" note (same limit as the feedback). */
+const LOW_CONFIDENCE = 0.5;
 
 const GROUP_ORDER: (MomentName | "timing")[] = ["timing", "address", "takeaway", "top", "downswing", "impact", "finish"];
 
@@ -55,7 +59,7 @@ export default function SwingResults({ swing, onSeek }: Props) {
           {swing.mirrored_for_left_handed && " Left-handed swings are mirrored, so “lead” means your right side."}{" "}
           Select a row to see that moment.
           {counts.length > 0 &&
-            " Green is within what good swings show, yellow is slightly off, red is clearly off. Grey values are context only, or too uncertain to judge."}
+            " Green is within what good swings show, yellow is slightly off, red is clearly off. “Low confidence” means your joints or the club were hard to see at that moment, so treat the number with care."}
         </p>
 
         {swing.notes.length > 0 && (
@@ -77,39 +81,48 @@ export default function SwingResults({ swing, onSeek }: Props) {
         {orderedGroups(groups).map((g) => (
           <div key={g}>
             <h3 className="text-sm font-semibold text-mute">{g === "timing" ? "Timing" : (MOMENT_LABEL[g as MomentName] ?? g)}</h3>
-            <ul className="mt-2 divide-y divide-line overflow-hidden rounded-xl border border-line">
+            <ul className="mt-2 divide-y divide-line rounded-xl border border-line">
               {groups.get(g)!.map((m) => {
                 const info = measurementInfo(m.name);
-                const conf = confidenceLabel(m.confidence);
                 const rating = m.rating ? RATING[m.rating] : null;
                 // Older results have no rating: keep the old look (grey only when uncertain).
                 const valueCls = rating ? rating.value : m.rating === undefined && m.confidence >= 0.5 ? "" : "text-mute";
+                // The whole row seeks the video: a button stretched under the content, so the (i)
+                // can be a button of its own (a button inside a button is not allowed).
                 return (
-                  <li key={m.name}>
+                  <li
+                    key={m.name}
+                    className="relative grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 px-4 py-3 first:rounded-t-xl last:rounded-b-xl"
+                  >
                     <button
                       onClick={() => onSeek(m.frame_index)}
-                      className="grid w-full grid-cols-[1fr_auto] gap-x-4 gap-y-1 px-4 py-3 text-left transition-colors hover:bg-canvas"
-                    >
-                      <span className="font-medium">{info.label}</span>
-                      <span className={`tnum text-right text-lg font-semibold leading-tight ${valueCls}`}>
+                      aria-label={`${info.label}: ${formatMeasurement(m)}. Show this moment in the video.`}
+                      className="absolute inset-0 rounded-[inherit] transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                    />
+                      <span className="pointer-events-none relative font-medium">{info.label}</span>
+                      <span className={`tnum pointer-events-none relative text-right text-lg font-semibold leading-tight ${valueCls}`}>
                         {formatMeasurement(m)}
                       </span>
-                      <span className="text-sm text-mute">
+                      <span className="pointer-events-none relative text-sm text-mute">
                         {info.meaning}
                         {m.typical && (
                           <span className="mt-0.5 block text-ink/80">Good swings: {m.typical}</span>
                         )}
                       </span>
-                      <span className="flex flex-col items-end gap-1 text-right text-xs">
+                      <span className="pointer-events-none relative flex flex-col items-end gap-1 text-right text-xs">
                         {rating && (
                           <span className={`rounded-full px-2 py-0.5 font-semibold ${rating.pill}`}>{rating.text}</span>
                         )}
-                        <span className="text-mute">
-                          <span className={m.confidence < 0.5 ? conf.cls : ""}>{conf.text}</span> ·{" "}
-                          {m.type === "measured" ? "Measured" : "Estimated"}
-                        </span>
+                        {m.confidence < LOW_CONFIDENCE && (
+                          <span className="pointer-events-auto">
+                            <InfoTip label="Low confidence" question="What does low confidence mean?">
+                              <span className="mb-0.5 block font-semibold text-ink">What does low confidence mean?</span>
+                              The analysis could not see this part of your swing clearly (hidden joint, blur or poor
+                              light), so treat the number as a rough guide.
+                            </InfoTip>
+                          </span>
+                        )}
                       </span>
-                    </button>
                   </li>
                 );
               })}

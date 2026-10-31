@@ -7,7 +7,7 @@ const OVERALL: Record<QualityReport["overall"], { text: string; cls: string }> =
 };
 
 const SEVERITY_DOT: Record<string, string> = {
-  info: "bg-left",
+  info: "bg-skeleton-left",
   warning: "bg-warn",
   high: "bg-bad",
 };

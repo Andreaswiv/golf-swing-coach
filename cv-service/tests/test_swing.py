@@ -551,7 +551,7 @@ def test_ratings_use_the_feedback_limits():
     assert [_rated("shaft_points_downswing", v, toes=-60) for v in (-20, 30, 90, -70, -110)] == [
         "good", "watch", "bad", "watch", "bad"]
     assert _rated("spine_angle_top", 35) is None  # without the address angle there is nothing to compare
-    assert _rated("backswing_duration", 0.8) is None  # context only, no judgement
+    assert [_rated("backswing_duration", v) for v in (0.8, 0.45, 0.3)] == ["good", "watch", "bad"]
 
 
 def test_spine_angle_at_top_and_impact_is_rated_against_address():
@@ -564,9 +564,17 @@ def test_spine_angle_at_top_and_impact_is_rated_against_address():
     assert "40" in ms[1]["typical"]
 
 
-def test_uncertain_values_are_never_red_or_green():
+def test_uncertain_values_are_never_red():
     assert _rated("spine_angle_address", 18, confidence=0.3) == "watch"
-    assert _rated("spine_angle_address", 38, confidence=0.3) is None
+    assert _rated("spine_angle_address", 38, confidence=0.3) == "good"  # the UI says the confidence is low
+
+
+def test_every_measurement_gets_a_rating():
+    from .test_swing import make_payload as mp
+
+    for kw in ({"club_ground_x": 0.68}, {"camera_angle": "face_on", "club_ground_x": 0.68}):
+        unrated = [m["name"] for m in analyse_swing(mp(**kw))["measurements"] if m["rating"] is None]
+        assert unrated == [], (kw, unrated)
 
 
 def test_ratings_agree_with_the_feedback():

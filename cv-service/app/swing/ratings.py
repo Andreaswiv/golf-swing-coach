@@ -1,11 +1,15 @@
 """A traffic-light rating for each measurement, using the same limits as the feedback rules.
 
 Adds to each measurement dict:
-  * ``rating``: "good", "watch" (slightly off), "bad" (clearly off) or None (no judgement: the
-    value is context only, e.g. spine angle at the top, or the data is too uncertain to praise);
+  * ``rating``: "good", "watch" (slightly off), "bad" (clearly off), or None for a measurement
+    without a rule (none at the moment; spine angle at top/impact needs the address angle);
   * ``typical``: what good swings show, in words, or None.
 
-Low confidence follows the feedback rules: a clear fault is only "watch", and nothing is "good".
+Low confidence: a clear fault is only "watch", as in the feedback rules. The frontend says the
+confidence is low next to the rating.
+
+Ranges not used by the feedback rules (durations, face-on shoulder tilt and head shift at impact)
+are common coaching ranges for 2D video, not measured on reference swings like the others.
 """
 
 from __future__ import annotations
@@ -118,6 +122,24 @@ def _rules(toes: float | None) -> dict[str, tuple[Rule, str]]:
             _hand_path,
             f"between {HAND_PATH_INSIDE[0]:.0f}% inside and {HAND_PATH_OUTSIDE[0]:.0f}% outside",
         ),
+        # Real-time durations (left out for slow motion). The backswing starts when the HANDS move,
+        # a little after the club head, so it reads shorter than a club-based timing.
+        "backswing_duration": (_range(0.55, 1.2, 0.13, 0.3), "0.55 to 1.2 s"),
+        "downswing_duration": (_range(0.22, 0.45, 0.04, 0.15), "0.22 to 0.45 s"),
+        # Face-on. Shoulder tilt: positive = lead shoulder higher (2D, from horizontal).
+        "shoulder_tilt_address": (
+            _range(3, 18, 5, 7),
+            f"lead shoulder 3{deg} to 18{deg} higher (the trail hand sits lower on the grip)",
+        ),
+        "shoulder_tilt_top": (
+            _range(-55, -10, 10, 10),
+            f"lead shoulder 10{deg} to 55{deg} lower (the shoulders turn on a tilt, not flat)",
+        ),
+        "shoulder_tilt_impact": (_range(10, 40, 5, 10), f"lead shoulder 10{deg} to 40{deg} higher"),
+        "head_shift_impact": (
+            _range(-15, 5, 10, 7),
+            "from 15% behind to 5% ahead of its address position (the head stays behind the ball)",
+        ),
         "shaft_past_parallel_top": (
             lambda v: "watch" if v > PAST_PARALLEL or v < -45 else "good",
             f"from 45{deg} short of parallel to {PAST_PARALLEL:.0f}{deg} past",
@@ -152,6 +174,6 @@ def rate_measurements(measurements: list[dict], club: dict | None = None) -> Non
         confidence = m.get("confidence", 0.0)
         if m["name"] in ("spine_angle_top", "spine_angle_impact") and address is not None:
             confidence = min(confidence, address.get("confidence", 0.0))
-        if confidence < RELIABLE:
-            rating = {"bad": "watch", "good": None}.get(rating, rating)
+        if confidence < RELIABLE and rating == "bad":
+            rating = "watch"
         m["rating"], m["typical"] = rating, typical

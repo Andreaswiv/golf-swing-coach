@@ -23,7 +23,7 @@ services:
     build:
       context: ./cv-service
       args:
-        POSE_MODEL_VARIANT: ${POSE_MODEL_VARIANT:-full}   # lite | full | heavy
+        POSE_MODEL_VARIANT: ${POSE_MODEL_VARIANT:-heavy}   # lite | full | heavy (see the Dockerfile)
     environment:
       DATA_DIR: /data
       MAX_PROCESS_DIM: ${MAX_PROCESS_DIM:-1280}
