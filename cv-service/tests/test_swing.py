@@ -167,13 +167,62 @@ def test_left_handed_golfer_gets_the_same_results_as_mirrored_right_handed():
         assert measurements(left)[name]["value"] == pytest.approx(m["value"], abs=0.2), name
 
 
-def test_slow_motion_clip_drops_all_timing_values():
+def test_slow_motion_keeps_the_tempo_ratio_but_not_the_durations():
+    # Evenly slowed 4x at 30 fps: the ratio matches normal speed filmed with as many frames per real
+    # second (120 fps). Seconds of video are not seconds of swing, so the durations go.
+    real = measurements(analyse_swing(make_payload(fps=120.0)))
     result = analyse_swing(make_payload(time_scale=4.0, fps=30.0))
     assert result["status"] == "ok"
     assert any(n["code"] == "slow_motion_suspected" for n in result["notes"])
     names = measurements(result)
     assert "spine_angle_address" in names
-    assert not {"tempo_ratio", "backswing_duration", "downswing_duration"} & names.keys()
+    assert not {"backswing_duration", "downswing_duration"} & names.keys()
+    assert names["tempo_ratio"]["value"] == pytest.approx(real["tempo_ratio"]["value"], rel=0.08)
+    assert names["tempo_ratio"]["confidence"] < real["tempo_ratio"]["confidence"]
+    assert not any(n["code"] == "speed_change_suspected" for n in result["notes"])
+
+
+def _speed_warped_payload(segments, fps=30.0):
+    """The synthetic swing filmed with changing playback speed. ``segments``: [(until real time s,
+    slow-motion factor), ...]; e.g. [(1.2, 2), (9, 8)] = 2x slow until 1.2 s of the swing, then 8x."""
+    base = make_payload(fps=fps)
+    template = base["frames"][0]["lm"]
+    frames, i, t_real = [], 0, 0.0
+    while t_real < END:
+        factor = next(f for until, f in segments if t_real < until)
+        hx, hy = hands_at(t_real)
+        lm = [list(row) for row in template]
+        for w in ("left_wrist", "right_wrist"):
+            lm[I[w]][:2] = [hx, hy]
+        frames.append({"i": i, "t": round(i / fps, 4), "n": 1, "lm": lm})
+        i += 1
+        t_real += (1 / fps) / factor
+    return {**base, "frames": frames, "video": {**base["video"], "frame_count": len(frames)}}
+
+
+def _tempo_dropped_for_speed_change(result):
+    assert result["status"] == "ok", result["notes"]
+    assert "tempo_ratio" not in measurements(result)
+    assert any(n["code"] == "speed_change_suspected" for n in result["notes"])
+
+
+def test_slowed_backswing_with_a_real_time_downswing_has_no_tempo():
+    # Slow motion until the top, normal speed after: backswing 4x too long, ratio about 13 : 1.
+    _tempo_dropped_for_speed_change(analyse_swing(_speed_warped_payload([(TOP_END, 4), (99, 1)])))
+
+
+def test_real_time_backswing_with_a_slowed_downswing_has_no_tempo():
+    # The common phone case: slow motion starts at the top. Ratio below 1, which no real swing has.
+    _tempo_dropped_for_speed_change(analyse_swing(_speed_warped_payload([(TOP_END, 1), (99, 8)])))
+
+
+def test_slow_motion_starting_mid_backswing_has_no_tempo():
+    # 2x, then 8x from the middle of the backswing: the ratio looks plausible (about 2.4 instead of 3.6),
+    # so only the jump in hand speed in the middle of the backswing gives it away.
+    result = analyse_swing(_speed_warped_payload([(1.2, 2), (99, 8)]))
+    _tempo_dropped_for_speed_change(result)
+    fb = result["feedback"]
+    assert any(x.startswith("Tempo") for x in fb["not_checked"])
 
 
 def test_low_frame_rate_lowers_impact_confidence():
@@ -360,7 +409,7 @@ def test_face_on_rules_and_not_checked_list():
 def test_tempo_and_slow_motion_note():
     assert _kinds(build_feedback([_m("tempo_ratio", 3.0, phase="top", unit="ratio")], "face_on", []))["good_tempo"] == "strength"
     assert _kinds(build_feedback([_m("tempo_ratio", 1.5, phase="top", unit="ratio")], "face_on", []))["quick_backswing"] == "watch"
-    fb = build_feedback([], "down_the_line", [{"code": "slow_motion_suspected", "message": ""}])
+    fb = build_feedback([], "down_the_line", [{"code": "speed_change_suspected", "message": ""}])
     assert fb["findings"] == []
     assert any(x.startswith("Tempo") for x in fb["not_checked"])
     assert "not enough reliable data" in fb["summary"]
@@ -408,6 +457,10 @@ def test_tour_swing_regression():
     assert any(n["code"] == "slow_motion_suspected" for n in result["notes"])
     kinds = {f["code"]: f["kind"] for f in result["feedback"]["findings"]}
     assert "improve" not in kinds.values() and "watch" not in kinds.values(), kinds
+    # A re-edited YouTube slow-motion clip: its frames are not evenly spaced in time (the hands move in
+    # bursts mid-backswing), so the tempo is left out rather than measured wrong.
+    assert any(n["code"] == "speed_change_suspected" for n in result["notes"])
+    assert "tempo_ratio" not in {m["name"] for m in result["measurements"]}
     assert {"good_setup_posture", "kept_posture", "steady_head", "on_plane"} <= kinds.keys()
     assert result["club"]["tracked"] and result["club"]["found_share"]["shaft"] > 0.9
     impact = [m for m in result["measurements"] if m["phase"] == "impact"]

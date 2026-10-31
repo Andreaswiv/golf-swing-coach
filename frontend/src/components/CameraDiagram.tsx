@@ -10,14 +10,14 @@ export default function CameraDiagram({ angle }: { angle: CameraAngle }) {
   const camera = angle === "face_on" ? { x: 90, y: 112, rot: 0 } : { x: 16, y: 60, rot: 90 };
   return (
     <svg viewBox="0 0 180 130" className="h-28 w-full" role="img" aria-label={`Camera position for ${angle === "face_on" ? "face-on" : "down-the-line"}`}>
-      <line x1="8" y1="60" x2="172" y2="60" stroke="#b9c2b4" strokeWidth="1.5" strokeDasharray="4 4" />
-      <path d="M166 55l6 5-6 5" fill="none" stroke="#b9c2b4" strokeWidth="1.5" />
-      <ellipse cx="90" cy="40" rx="15" ry="7" fill="#1d6a43" opacity="0.9" />
+      <line x1="8" y1="60" x2="172" y2="60" stroke="#c3c8d2" strokeWidth="1.5" strokeDasharray="4 4" />
+      <path d="M166 55l6 5-6 5" fill="none" stroke="#c3c8d2" strokeWidth="1.5" />
+      <ellipse cx="90" cy="40" rx="15" ry="7" fill="var(--foreground)" opacity="0.85" />
       <circle cx="90" cy="40" r="4.5" fill="#ffffff" />
-      <circle cx="116" cy="60" r="3" fill="#16201a" />
+      <circle cx="116" cy="60" r="3" fill="var(--foreground)" />
       <g transform={`translate(${camera.x} ${camera.y}) rotate(${camera.rot})`}>
-        <rect x="-9" y="-6" width="18" height="12" rx="3" fill="#4aa3df" />
-        <path d="M-5 -6 L0 -16 L5 -6" fill="none" stroke="#4aa3df" strokeWidth="1.5" opacity="0.7" />
+        <rect x="-9" y="-6" width="18" height="12" rx="3" fill="var(--leaf-4)" />
+        <path d="M-5 -6 L0 -16 L5 -6" fill="none" stroke="var(--leaf-4)" strokeWidth="1.5" opacity="0.7" />
       </g>
     </svg>
   );

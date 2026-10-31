@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type Analysis } from "../api";
-import QualityReportView from "../components/QualityReportView";
-import { AlertIcon, CheckIcon, ClockIcon } from "../components/icons";
+import { AlertCircle, Check, Clock } from "lucide-react";
+import { api, type Analysis } from "@/api";
+import QualityReportView from "@/components/QualityReportView";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 // The stages the computer-vision service reports, in order.
 const STAGES = [
@@ -89,11 +95,12 @@ export default function Processing() {
 
   if (!analysis) {
     return error ? (
-      <p role="alert" className="text-bad">
-        {error}
-      </p>
+      <Alert variant="destructive" className="mx-auto max-w-xl">
+        <AlertCircle />
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
     ) : (
-      <p className="text-mute">Loading…</p>
+      <Skeleton className="mx-auto h-[420px] max-w-xl rounded-xl" />
     );
   }
 
@@ -103,95 +110,86 @@ export default function Processing() {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
-      <section className="card p-6 sm:p-8">
-        <h1 className="text-2xl">
-          {failed ? "The analysis failed" : done ? "Your analysis is ready" : "Analysing your swing"}
-        </h1>
-        <p className="mt-1 truncate text-sm text-mute">{analysis.video.originalFileName}</p>
+        <Card className="gap-0 p-6 sm:p-8">
+          <h1 className="text-2xl">
+            {failed ? "The analysis failed" : done ? "Your analysis is ready" : "Analysing your swing"}
+          </h1>
+          <p className="mt-1 truncate text-sm text-muted-foreground">{analysis.video.originalFileName}</p>
 
+          {!failed && (
+            <div aria-live="polite" className="mt-6">
+              <Progress value={analysis.progress} aria-label="Processing progress" className="h-2" />
+              <p className="tnum mt-2 flex items-center justify-between text-sm text-muted-foreground">
+                <span>{analysis.progress}%</span>
+                {running && (
+                  <span className="flex items-center gap-1.5" aria-label={`Running for ${elapsedSince(analysis.createdAt, now)}`}>
+                    <Clock className="size-4" />
+                    {elapsedSince(analysis.createdAt, now)}
+                  </span>
+                )}
+              </p>
 
-        {!failed && (
-          <div aria-live="polite" className="mt-6">
-            <div
-              className="h-2.5 overflow-hidden rounded-full bg-subtle"
-              role="progressbar"
-              aria-valuenow={analysis.progress}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Processing progress"
-            >
-              <div
-                className="h-full rounded-full bg-brand transition-[width] duration-500"
-                style={{ width: `${analysis.progress}%` }}
-              />
-            </div>
-            <p className="tnum mt-2 flex items-center justify-between text-sm text-mute">
-              <span>{analysis.progress}%</span>
-              {running && (
-                <span className="flex items-center gap-1.5" aria-label={`Running for ${elapsedSince(analysis.createdAt, now)}`}>
-                  <ClockIcon className="h-4 w-4" />
-                  {elapsedSince(analysis.createdAt, now)}
-                </span>
-              )}
-            </p>
-
-            <ol className="mt-5 space-y-3">
-              {STAGES.slice(1).map((s, j) => {
-                const i = j + 1;
-                const complete = i < current || done;
-                const active = i === current && !done;
-                return (
-                  <li key={s} className={`flex items-center gap-3 text-sm ${complete || active ? "text-ink" : "text-mute"}`}>
-                    <span
-                      aria-hidden
-                      className={`flex h-6 w-6 items-center justify-center rounded-full ${
-                        complete ? "bg-brand text-white" : active ? "bg-brand-soft ring-2 ring-brand" : "bg-subtle"
-                      }`}
+              <ol className="mt-6 space-y-3">
+                {STAGES.slice(1).map((s, j) => {
+                  const i = j + 1;
+                  const complete = i < current || done;
+                  const active = i === current && !done;
+                  return (
+                    <li
+                      key={s}
+                      className={cn("flex items-center gap-3 text-sm", complete || active ? "text-foreground" : "text-muted-foreground")}
                     >
-                      {complete && <CheckIcon className="h-3.5 w-3.5" />}
-                    </span>
-                    {STAGE_LABEL[s]}
-                  </li>
-                );
-              })}
-            </ol>
-          </div>
-        )}
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "flex size-6 items-center justify-center rounded-full",
+                          complete ? "bg-primary text-primary-foreground" : active ? "bg-brand-soft ring-2 ring-leaf-4" : "bg-muted",
+                        )}
+                      >
+                        {complete && <Check className="size-3.5" />}
+                      </span>
+                      {STAGE_LABEL[s]}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
 
-        {failed && (
-          <div role="alert" className="mt-5 rounded-xl bg-bad-soft p-4 text-sm">
-            <p className="flex gap-2 font-medium text-bad">
-              <AlertIcon className="h-5 w-5 shrink-0" />
-              {analysis.error ?? "The video could not be processed."}
+          {failed && (
+            <Alert variant="destructive" className="mt-5">
+              <AlertCircle />
+              <AlertTitle>{analysis.error ?? "The video could not be processed."}</AlertTitle>
+              <AlertDescription>
+                <p>
+                  Check that the file plays on your computer, then{" "}
+                  <Link to="/analyse" className="link">
+                    try again
+                  </Link>
+                  . Re-exporting as H.264 MP4 fixes most video format problems.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {error && !failed && (
+            <p className="mt-4 text-sm text-destructive" role="status">
+              Connection problem: {error}. Retrying…
             </p>
-            <p className="mt-2 text-mute">
-              Check that the file plays on your computer, then{" "}
-              <Link to="/analyse" className="link">
-                try again
-              </Link>
-              . Re-exporting as H.264 MP4 fixes most video format problems.
-            </p>
-          </div>
-        )}
+          )}
 
-        {error && !failed && (
-          <p className="mt-4 text-sm text-bad" role="status">
-            Connection problem: {error}. Retrying…
-          </p>
-        )}
+          {done && (
+            <Button asChild size="lg" className="mt-6 w-full">
+              <Link to={`/analyses/${analysis.id}`}>See your feedback</Link>
+            </Button>
+          )}
+        </Card>
 
-        {done && (
-          <Link to={`/analyses/${analysis.id}`} className="btn btn-primary mt-6 w-full py-3">
-            See your feedback
-          </Link>
+        {done && analysis.quality && (
+          <Card className="animate-in fade-in-0 p-6 duration-500">
+            <QualityReportView quality={analysis.quality} />
+          </Card>
         )}
-      </section>
-
-      {done && analysis.quality && (
-        <div className="card p-6">
-          <QualityReportView quality={analysis.quality} />
-        </div>
-      )}
     </div>
   );
 }

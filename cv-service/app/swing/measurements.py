@@ -134,15 +134,75 @@ def _sign(value: float) -> float:
     return 1.0 if value >= 0 else -1.0
 
 
+# Tempo in slow motion. The tempo ratio (backswing time / downswing time) does not change when the
+# whole swing is slowed evenly, so it is measured on slow-motion clips too; only the durations in
+# seconds are left out. What breaks it is a clip that changes speed DURING the swing (phone slow
+# motion often plays normal speed at the start and end). Two checks for that:
+#   * every real swing takes roughly 1.5 to 5 times as long going back as coming down, so a ratio
+#     outside PLAUSIBLE_TEMPO means one half of the swing was slowed and the other was not;
+#   * in the middle of the backswing the hands move smoothly (no sudden starts or stops), so a jump in
+#     their speed of SPEED_JUMP or more means the playback speed changed (or frames are unevenly
+#     spaced, as in re-edited clips). Speed = net distance over a window of frames, which averages out
+#     jitter and duplicated frames. Phone slow motion changes speed 4x (120 fps) or 8x (240 fps), which
+#     measures 3.5x and more after smoothing; clips at one speed stayed under 1.7x.
+PLAUSIBLE_TEMPO = (1.2, 6.0)
+SPEED_JUMP = 3.0
+MIN_JUMP_WINDOW = 5  # frames per side; fewer cannot tell a speed change from noise
+MOVING = 0.004  # torso lengths per frame: below this the hands are as good as still
+SLOW_MOTION_TEMPO_CONFIDENCE = 0.85
+
+
+def _speed_jump_in_backswing(s: Series, phases: Phases) -> bool:
+    f = phases.frame
+    take, top = f("takeaway"), f("top")
+    hands = weighted_point(s, ["left_wrist", "right_wrist"]) / phases.torso_px
+    # The middle of the backswing by where the hands are (15-85% of the way up), not by frame count:
+    # in a clip that slows down halfway, most frames come from the slow part.
+    rise = hands[take, 1] - hands[top, 1]
+    if not rise > 0:
+        return False
+    progress = (hands[take : top + 1, 1] - hands[take, 1]) / -rise
+    inside = np.flatnonzero((progress >= 0.15) & (progress <= 0.85))
+    if not len(inside):
+        return False
+    lo, hi = take + int(inside[0]), take + int(inside[-1])
+    w = max(MIN_JUMP_WINDOW, (hi - lo) // 8)
+    if hi - lo < 3 * w:
+        return False  # too few frames to tell; the plausibility check still applies
+    for k in range(lo + w, hi - w + 1):
+        before = np.linalg.norm(hands[k] - hands[k - w]) / w
+        after = np.linalg.norm(hands[k + w] - hands[k]) / w
+        if min(before, after) >= MOVING and max(after / before, before / after) >= SPEED_JUMP:
+            return True
+    return False
+
+
+def timing_problem(s: Series, phases: Phases) -> str | None:
+    """Why the tempo cannot be measured from this clip ("speed_change"), or None if it can."""
+    f = phases.frame
+    back = s.t[f("top")] - s.t[f("takeaway")]
+    down = s.t[f("impact")] - s.t[f("top")]
+    if down <= 0 or back <= 0:
+        return "missing"
+    if not PLAUSIBLE_TEMPO[0] <= back / down <= PLAUSIBLE_TEMPO[1]:
+        return "speed_change"
+    if _speed_jump_in_backswing(s, phases):
+        return "speed_change"
+    return None
+
+
 def _timing(c: _Context, phases: Phases) -> list[Measurement]:
     f, s = phases.frame, c.s
     t_take, t_top, t_imp = f("takeaway"), f("top"), f("impact")
-    back, down = s.t[t_top] - s.t[t_take], s.t[t_imp] - s.t[t_top]
-    # Slow-motion clips are left out entirely: phone slow motion often ramps speed within the
-    # clip, which distorts the tempo ratio as well as the durations.
-    if down <= 0 or back <= 0 or phases.slow_motion_suspected:
+    if timing_problem(s, phases):
         return []
-    conf = round(min(phases.confidence(n) for n in ("takeaway", "top", "impact")), 2)
+    back, down = s.t[t_top] - s.t[t_take], s.t[t_imp] - s.t[t_top]
+    conf = min(phases.confidence(n) for n in ("takeaway", "top", "impact"))
+    if phases.slow_motion_suspected:
+        # The ratio survives slow motion; seconds of video are not seconds of swing.
+        conf = round(conf * SLOW_MOTION_TEMPO_CONFIDENCE, 2)
+        return [Measurement("tempo_ratio", "top", int(t_top), round(back / down, 2), "ratio", "estimated", conf)]
+    conf = round(conf, 2)
     return [
         Measurement("tempo_ratio", "top", int(t_top), round(back / down, 2), "ratio", "estimated", conf),
         Measurement("backswing_duration", "top", int(t_top), round(back, 2), "s", "estimated", conf),

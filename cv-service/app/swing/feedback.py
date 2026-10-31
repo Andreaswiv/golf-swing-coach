@@ -540,8 +540,8 @@ def _summary(findings: list[Finding]) -> str:
 
 def _not_checked(camera_angle: str, notes: list[dict], club: dict | None = None) -> list[str]:
     items = []
-    if any(n["code"] == "slow_motion_suspected" for n in notes):
-        items.append("Tempo: the clip seems to be slow motion, so timing could not be judged.")
+    if any(n["code"] == "speed_change_suspected" for n in notes):
+        items.append("Tempo: the clip changes speed during the swing (common in phone slow motion), so tempo could not be judged.")
     if camera_angle == "down_the_line":
         items.append("Sway and weight shift toward the target can't be seen from behind. Film face-on to check them.")
     elif camera_angle == "face_on":
