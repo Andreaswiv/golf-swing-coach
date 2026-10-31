@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, Check } from "lucide-react";
-import type { Analysis, SwingMeasurement } from "@/api";
+import type { Analysis, Rating, SwingMeasurement } from "@/api";
 import { reducedMotion, useCountUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { RATING } from "@/swingLabels";
 import type { SwingPoint } from "@/swingStats";
 
 /*
@@ -44,35 +45,60 @@ function Value({ value, format, className }: { value: number | null; format: (v:
   );
 }
 
+/** Good / Slightly off / Clearly off, as on the analysis page (same limits as the feedback). */
+function RatingPill({ rating, text, title }: { rating: Rating | null | undefined; text?: string; title?: string }) {
+  if (!rating) return null;
+  return (
+    <span
+      title={title}
+      className={cn("absolute top-6 right-6 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium", RATING[rating].pill)}
+    >
+      <span className={cn("size-1.5 rounded-full", RATING[rating].dot)} />
+      {text ?? RATING[rating].text}
+    </span>
+  );
+}
+
+/** What good swings show, under the number. */
+function Typical({ m }: { m: SwingMeasurement | null }) {
+  return m?.typical ? <p className="mt-2 text-[14px] text-[#6b6b68]">Good swings: {m.typical}</p> : null;
+}
+
+const RATING_STROKE: Record<Rating, string> = { good: "#3f9a3c", watch: "#d9a21b", bad: "#d2483a" };
+
 const signed = (v: number, digits = 0) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(digits)}`;
 
 /* ---- Tempo gauge ------------------------------------------------------------------------------- */
 
 const TEMPO_MAX = 5;
 
-function TempoGauge({ tempo }: { tempo: number | null }) {
+/** Good tempo, as in the ratings: TEMPO_RANGE in cv-service/app/swing/feedback.py. */
+const TEMPO_GOOD = [2.3, 4.0] as const;
+
+function TempoGauge({ m }: { m: SwingMeasurement | null }) {
   const grown = useGrown();
+  const tempo = m?.value ?? null;
   const frac = tempo === null ? 0 : Math.min(tempo / TEMPO_MAX, 1);
   const arc = (r: number) => `M${110 - r} 115 A${r} ${r} 0 0 1 ${110 + r} 115`;
+  // Point on the dial for a tempo, at radius r (0 on the left, TEMPO_MAX on the right).
+  const at = (v: number, r: number) => [110 - r * Math.cos((v / TEMPO_MAX) * Math.PI), 115 - r * Math.sin((v / TEMPO_MAX) * Math.PI)];
+  const [b0, b1] = [at(TEMPO_GOOD[0], 107), at(TEMPO_GOOD[1], 107)];
   const target = (3 / TEMPO_MAX) * Math.PI;
   return (
     <Card area="gauge" className="flex flex-col">
       <Title>Tempo</Title>
+      <RatingPill rating={m?.rating} />
+      <p className="mt-2 text-[14px] text-[#6b6b68]">Good swings: about 3 : 1</p>
       <div className="relative mx-auto mt-auto w-full max-w-[260px]">
         <svg viewBox="0 0 220 130" className="w-full overflow-visible">
-          <defs>
-            <linearGradient id="gauge-fill" x1="0" y1="1" x2="1" y2="0">
-              <stop offset="0" stopColor="#f0874a" />
-              <stop offset="0.55" stopColor="#f3d257" />
-              <stop offset="1" stopColor="#a8e06b" />
-            </linearGradient>
-          </defs>
           <path d={arc(95)} fill="none" stroke="#fafaf9" strokeWidth="16" strokeLinecap="round" />
+          {/* The good range, as a green band just outside the dial. */}
+          <path d={`M${b0[0]} ${b0[1]} A107 107 0 0 1 ${b1[0]} ${b1[1]}`} fill="none" stroke="#3f9a3c" strokeOpacity="0.55" strokeWidth="4" strokeLinecap="round" />
           <path d={arc(76)} fill="none" stroke="#b9b9b5" strokeWidth="1.2" strokeDasharray="1 4" />
           <path
             d={arc(95)}
             fill="none"
-            stroke="url(#gauge-fill)"
+            stroke={m?.rating ? RATING_STROKE[m.rating] : "#9a9a96"}
             strokeWidth="16"
             strokeLinecap="round"
             pathLength={1}
@@ -139,6 +165,12 @@ function ProgressCurve({ points }: { points: SwingPoint[] }) {
   return (
     <Card area="curve" className="flex flex-col">
       <Title>Progress</Title>
+      {latest !== null && previous !== null && (
+        <RatingPill
+          rating={Math.abs(latest - previous) < 1 ? "watch" : latest > previous ? "good" : "bad"}
+          text={Math.abs(latest - previous) < 1 ? "Steady" : latest > previous ? "Improving" : "Dropping"}
+        />
+      )}
       <Value
         value={latest}
         format={(v) => `${Math.round(v)}%`}
@@ -221,12 +253,22 @@ function StrengthsCard({ latest }: { latest: Analysis | null }) {
 
 const RATING_TEXT = { good: "text-[#3f9a3c]", watch: "text-[#c98a12]", bad: "text-[#d2483a]" } as const;
 
-function PlaneCard({ shaft, path, verdict }: { shaft: SwingMeasurement | null; path: SwingMeasurement | null; verdict: string }) {
+function PlaneCard({
+  shaft,
+  path,
+  verdict,
+  rating,
+}: {
+  shaft: SwingMeasurement | null;
+  path: SwingMeasurement | null;
+  verdict: string;
+  rating: Rating | null;
+}) {
   const grown = useGrown();
   // The shaft's direction halfway down, against the plane line at address (vertical here).
   const tilt = shaft ? Math.max(-28, Math.min(28, (shaft.value / 100) * 30)) : 0;
   const rows: [string, string, string][] = [
-    ["Swing plane", verdict, "text-[#3d6ef5]"],
+    ["Swing plane", verdict, rating ? RATING_TEXT[rating] : "text-[#6b6b68]"],
     ["Shaft halfway down", shaft ? `${signed(shaft.value)}%` : "–", shaft?.rating ? RATING_TEXT[shaft.rating] : ""],
     ["Hand path", path ? `${signed(path.value)}%` : "–", path?.rating ? RATING_TEXT[path.rating] : ""],
   ];
@@ -269,12 +311,22 @@ function PlaneCard({ shaft, path, verdict }: { shaft: SwingMeasurement | null; p
 
 const DOTS = { maskImage: "radial-gradient(circle, #000 1.7px, transparent 2px)", maskSize: "7px 7px" };
 
+/** 80%+ of measurements in the good range is good; under 60% is clearly off. */
+const shareRating = (share: number): Rating => (share >= 80 ? "good" : share >= 60 ? "watch" : "bad");
+
 function RatedGoodBar({ share }: { share: number | null }) {
   const grown = useGrown();
   return (
     <Card area="weight" className="flex flex-col justify-center gap-4">
       <div className="flex items-baseline justify-between gap-3">
-        <Title>Rated good</Title>
+        <Title className="flex items-center gap-2">
+          Rated good
+          {share !== null && (
+            <span className={cn("rounded-full px-2.5 py-1 text-[12px] font-medium", RATING[shareRating(share)].pill)}>
+              {RATING[shareRating(share)].text}
+            </span>
+          )}
+        </Title>
         <p className="text-[34px] leading-none font-semibold tracking-[-0.02em] tabular-nums">
           <Counted value={share} />
           <span className="ml-1 text-[18px] font-medium">%</span>
@@ -309,6 +361,7 @@ export function MetricsBento({ latest, points }: { latest: Analysis | null; poin
   const findings = latest?.swing?.feedback?.findings ?? [];
   const plane = findings.find((f) => ["over_the_top", "inside_out", "on_plane"].includes(f.code));
   const verdict = plane ? { over_the_top: "Over the top", inside_out: "Inside-out", on_plane: "On plane" }[plane.code]! : latest?.swing?.club?.tracked ? "No verdict" : "Not tracked";
+  const planeRating: Rating | null = plane ? ({ strength: "good", watch: "watch", improve: "bad" } as const)[plane.kind] : null;
   const latestPoint = points.at(-1) ?? null;
   const date = latest ? new Date(latest.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "long" }) : null;
 
@@ -332,30 +385,36 @@ export function MetricsBento({ latest, points }: { latest: Analysis | null; poin
         </div>
 
         <div className="bento mt-14 grid gap-5 font-aspekta">
-            <TempoGauge tempo={tempo?.value ?? null} />
+            <TempoGauge m={tempo} />
             <Card area="spine">
               <Title>Spine angle</Title>
+              <RatingPill rating={spine?.rating} />
               <Value value={spine?.value ?? null} format={(v) => `${signed(v)}°`} />
+              <Typical m={spine} />
             </Card>
             <Card area="head">
               <Title>Head movement</Title>
+              <RatingPill rating={head?.rating} />
               <Value
                 value={head ? Math.abs(head.value) * (AVERAGE_TORSO_CM / 100) : null}
                 format={(v) => `${v.toFixed(1)} cm`}
               />
               {head && (
                 <p className="mt-2 text-[14px] text-[#6b6b68]">
-                  {head.value >= 0 ? "Up" : "Down"} at {head.name.endsWith("top") ? "the top" : "impact"} (≈)
+                  {head.value >= 0 ? "Up" : "Down"} at {head.name.endsWith("top") ? "the top" : "impact"} · good swings: under
+                  about {head.value >= 0 ? "4 cm up" : "10 cm down"}
                 </p>
               )}
             </Card>
             <Card area="knee">
               <Title>Knee flex</Title>
+              <RatingPill rating={knee?.rating} />
               <Value value={knee?.value ?? null} format={(v) => `${signed(v)}°`} />
+              <Typical m={knee} />
             </Card>
             <ProgressCurve points={points} />
             <StrengthsCard latest={latest} />
-            <PlaneCard shaft={m("shaft_points_downswing")} path={m("hand_path_downswing")} verdict={verdict} />
+            <PlaneCard shaft={m("shaft_points_downswing")} path={m("hand_path_downswing")} verdict={verdict} rating={planeRating} />
             <RatedGoodBar share={latestPoint?.goodShare ?? null} />
         </div>
       </div>

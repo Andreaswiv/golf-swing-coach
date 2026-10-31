@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { PhaseName } from "@/api";
 import { cn } from "@/lib/utils";
 import { PHASE_LABEL } from "@/swingLabels";
-import { PoseFigure, boundsOf, useSwingPlayback, type Pose } from "./PoseFigure";
+import { PoseFigure, boundsOf, useSwingClock, type Pose } from "./PoseFigure";
 
 /*
   The homepage hero: an example analysis acted out by the soft white figure (no real person on
@@ -16,8 +16,108 @@ import { PoseFigure, boundsOf, useSwingPlayback, type Pose } from "./PoseFigure"
 */
 
 type ExampleFrame = Pose & { club: [number, number, number, number] };
-const frames = example.frames as unknown as ExampleFrame[];
+type Club = ExampleFrame["club"];
+
+const rawFrames = example.frames as unknown as ExampleFrame[];
 const phases = example.phases as Record<PhaseName, number>;
+
+/** Gaussian average of `xs` where frame i uses its own width `sigma[i]` (in frames). */
+function gaussVarying(xs: number[], sigma: number[]): number[] {
+  return xs.map((_, i) => {
+    const r = Math.ceil(sigma[i] * 2.5);
+    let sum = 0;
+    let weight = 0;
+    for (let j = Math.max(0, i - r); j <= Math.min(xs.length - 1, i + r); j++) {
+      const w = Math.exp(-((j - i) ** 2) / (2 * sigma[i] ** 2));
+      sum += xs[j] * w;
+      weight += w;
+    }
+    return sum / weight;
+  });
+}
+
+/**
+ * The club as detected jitters a few pixels from frame to frame. In the slow backswing that jitter is
+ * large next to the motion, so the path wiggles; in the fast downswing it hardly shows, and heavy
+ * smoothing there would cut the corner at the bottom of the arc. So: a 3-frame median against
+ * single-frame outliers, then a Gaussian that is wide in the backswing (sigma 3 frames) and narrow from
+ * the top on (sigma 1), blended over a few frames around the top.
+ */
+function smoothClub(raw: Club[]): Club[] {
+  const median3 = (xs: number[]) => xs.map((x, i) => (i === 0 || i === xs.length - 1 ? x : [xs[i - 1], x, xs[i + 1]].sort((a, b) => a - b)[1]));
+  const top = phases.top;
+  const sigma = raw.map((_, i) => 1 + 2 * Math.min(1, Math.max(0, (top - i) / 6)));
+  const columns = [0, 1, 2, 3].map((c) => gaussVarying(median3(raw.map((club) => club[c])), sigma));
+  return raw.map((_, i) => columns.map((col) => col[i]) as Club);
+}
+
+const smoothed = smoothClub(rawFrames.map((f) => f.club));
+const frames: ExampleFrame[] = rawFrames.map((f, i) => ({ ...f, club: smoothed[i] }));
+
+/*
+  Tempo. The source clip is phone slow motion that changes speed partway (it plays the follow-through
+  at normal speed), so its own timing is not used. Instead each phase gets a tour player's timing:
+  the familiar 3 : 1 (about 0.8 s back, 0.27 s down, typical of tour players) and a 0.4 s
+  follow-through, all played SLOW_MOTION times slower so it is easy to follow. Frames are spread
+  evenly within each phase, which keeps that phase's own acceleration.
+*/
+const SLOW_MOTION = 3;
+const DOWNSWING_S = 0.27;
+const FOLLOW_THROUGH_S = 0.4;
+/**
+ * Where the source clip goes back to normal speed: 3 frames after impact (the hands' movement per frame
+ * triples there). Those 3 frames are still slow motion, so they keep the downswing's pace; splitting
+ * the follow-through evenly instead made the swing stall just after impact.
+ */
+const SPEED_SWITCH = phases.impact + 3;
+const downswingFrame = DOWNSWING_S / (phases.impact - phases.top);
+/** Real seconds per stretch of frames: [from, to, seconds]. The set-up parts are timed for viewing. */
+const PHASE_SECONDS: [number, number, number][] = [
+  [0, phases.address, 0.1],
+  [phases.address, phases.takeaway, 0.23],
+  [phases.takeaway, phases.top, 0.8],
+  [phases.top, phases.impact, DOWNSWING_S],
+  [phases.impact, SPEED_SWITCH, (SPEED_SWITCH - phases.impact) * downswingFrame],
+  [SPEED_SWITCH, phases.finish, FOLLOW_THROUGH_S - (SPEED_SWITCH - phases.impact) * downswingFrame],
+  [phases.finish, frames.length - 1, 0.2],
+];
+/** When each frame is shown, in ms from the start. */
+const SHOW_AT: number[] = (() => {
+  const at = new Array<number>(frames.length).fill(0);
+  let t = 0;
+  for (const [from, to, seconds] of PHASE_SECONDS) {
+    const ms = seconds * SLOW_MOTION * 1000;
+    for (let i = from; i <= to; i++) at[i] = t + (to > from ? ((i - from) / (to - from)) * ms : 0);
+    t += ms;
+  }
+  return at;
+})();
+const TOTAL = SHOW_AT[SHOW_AT.length - 1];
+
+/** Fractional source frame at playback progress p (0..1). */
+function framePosition(p: number): number {
+  const t = p * TOTAL;
+  let i = 0;
+  while (i < SHOW_AT.length - 2 && SHOW_AT[i + 1] <= t) i++;
+  return Math.min(frames.length - 1, i + (t - SHOW_AT[i]) / (SHOW_AT[i + 1] - SHOW_AT[i]));
+}
+
+const lerp = (a: number, b: number, f: number) => a + (b - a) * f;
+
+/** The figure between two frames: every joint and the club, linearly. */
+function frameAt(u: number): ExampleFrame {
+  const i = Math.floor(u);
+  const f = u - i;
+  const a = frames[i];
+  const b = frames[Math.min(frames.length - 1, i + 1)];
+  if (f === 0 || a === b) return a;
+  const out = {} as Record<string, number[]>;
+  for (const key of Object.keys(a) as (keyof ExampleFrame)[]) {
+    out[key] = (a[key] as number[]).map((v, c) => lerp(v, (b[key] as number[])[c], f));
+  }
+  return out as unknown as ExampleFrame;
+}
+
 const ORDER: PhaseName[] = ["address", "takeaway", "top", "impact", "finish"];
 /** Club-head positions kept lit behind the club, in frames. */
 const TRAIL = 16;
@@ -46,7 +146,7 @@ const NOTES: Note[] = [
 /** One frame around the whole swing (club included), so the figure stays put while it moves. */
 const BOX = boundsOf(frames, frames.flatMap((f) => [[f.club[2], f.club[3]] as [number, number]]), 0.06);
 
-const currentPhase = (index: number) => [...ORDER].reverse().find((name) => phases[name] <= index) ?? "address";
+const currentPhase = (u: number) => [...ORDER].reverse().find((name) => phases[name] <= u) ?? "address";
 
 /**
  * The figure, its notes and the phase timeline: the only part that changes every frame, kept apart
@@ -55,15 +155,20 @@ const currentPhase = (index: number) => [...ORDER].reverse().find((name) => phas
 function ExampleStage() {
   const ref = useRef<HTMLDivElement>(null);
   // Plays the swing once when the page opens, then holds the finish.
-  const index = useSwingPlayback(frames.length, 5200, ref, { once: true });
+  const progress = useSwingClock(TOTAL, ref, { once: true });
+  const u = framePosition(progress);
+  const index = Math.floor(u);
   const box = BOX;
-  const frame = frames[index];
-  const phase = currentPhase(index);
+  const frame = frameAt(u);
+  const phase = currentPhase(u);
   const note = NOTES.find((n) => n.at.includes(phase));
-  const trail = frames.slice(Math.max(0, index - TRAIL), index + 1).map((f) => [f.club[2], f.club[3]] as [number, number]);
+  // The lit trail: club-head positions of the last TRAIL frames, ending exactly at the club head now.
+  const trail = [
+    ...frames.slice(Math.max(0, index - TRAIL), index + 1).map((f) => [f.club[2], f.club[3]] as [number, number]),
+    [frame.club[2], frame.club[3]] as [number, number],
+  ];
   const pct = (x: number, y: number) => [((x - box!.x) / box!.w) * 100, ((y - box!.y) / box!.h) * 100];
   const [nx, ny] = note ? pct(...note.anchor(frame)) : [0, 0];
-  const progress = index / (frames.length - 1);
 
   return (
           <div ref={ref} className="relative flex h-[min(78svh,760px)] min-h-[440px] flex-col">
@@ -95,9 +200,9 @@ function ExampleStage() {
                     key={name}
                     className={cn(
                       "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#1a3d29] transition-colors",
-                      phases[name] <= index ? "bg-white" : "bg-white/35",
+                      phases[name] <= u ? "bg-white" : "bg-white/35",
                     )}
-                    style={{ left: `${(phases[name] / (frames.length - 1)) * 100}%` }}
+                    style={{ left: `${(SHOW_AT[phases[name]] / TOTAL) * 100}%` }}
                   />
                 ))}
               </div>
