@@ -130,12 +130,6 @@ export const RATING: Record<Rating, { text: string; value: string; pill: string;
   bad: { text: "Clearly off", value: "text-bad", pill: "bg-bad-soft text-bad", dot: "bg-bad" },
 };
 
-export function confidenceLabel(c: number): { text: string; cls: string } {
-  if (c >= 0.75) return { text: "High confidence", cls: "text-good" };
-  if (c >= 0.5) return { text: "Medium confidence", cls: "text-warn" };
-  return { text: "Low confidence", cls: "text-bad" };
-}
-
 export type Tone = "good" | "warn" | "bad" | "neutral";
 
 /** One-line verdict for a swing, from the counts of finding kinds. */

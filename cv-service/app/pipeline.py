@@ -38,6 +38,10 @@ from .video import VideoError, VideoMetadata, open_video, probe_video
 
 KEYPOINTS_FORMAT = "golfcoach.keypoints.v1"
 BRIGHTNESS_SAMPLE_EVERY = 10
+# Longest video accepted (video time, so a slow-motion export counts at its playback length).
+# Keep in sync with MAX_VIDEO_SECONDS in frontend/src/api.ts.
+MAX_VIDEO_SECONDS = 15.0
+LENGTH_TOLERANCE_S = 0.05  # container rounding: a "15 s" phone clip can be 15.02 s
 # Club detection runs from this long before the takeaway to this long after the finish.
 CLUB_LEAD_S = 1.0
 CLUB_TAIL_S = 0.3
@@ -104,6 +108,14 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, separators=(",", ":"))
     os.replace(tmp, path)
+
+
+def _check_length(seconds: float) -> None:
+    if seconds > MAX_VIDEO_SECONDS + LENGTH_TOLERANCE_S:
+        raise VideoError(
+            f"The video is {seconds:.1f} seconds long. The limit is {MAX_VIDEO_SECONDS:.0f} seconds: "
+            "trim it to just the swing."
+        )
 
 
 def _downscale(frame: np.ndarray, max_dim: int) -> np.ndarray:
@@ -191,10 +203,8 @@ def run_pipeline(
 
     progress(1, "Reading video")
     meta = probe_video(video_path)
-    if meta.duration_seconds and meta.duration_seconds > 120:
-        raise VideoError(
-            "The video is longer than 2 minutes. Trim it to the swing (a few seconds)."
-        )
+    if meta.duration_seconds:
+        _check_length(meta.duration_seconds)
 
     # Pose first, on every frame: it is fast, and it is how the swing is found. The club detector
     # is about ten times slower per frame, so it only runs around the swing (second pass).
@@ -249,6 +259,8 @@ def run_pipeline(
         raise VideoError("No frames could be decoded from the video.")
 
     times = _frame_timestamps_seconds(raw_ms, meta.fps)
+    if not meta.duration_seconds:
+        _check_length(times[-1])  # the container did not say; the decoded frames do
     for frame_dict, t in zip(frames_out, times):
         frame_dict["t"] = round(t, 4)
         # keep "t" right after "i" for readability

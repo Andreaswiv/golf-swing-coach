@@ -4,6 +4,7 @@ import {
   ACCEPTED_EXTENSIONS,
   CLUBS,
   MAX_UPLOAD_MB,
+  MAX_VIDEO_SECONDS,
   api,
   type CameraAngle,
   type Handedness,
@@ -41,6 +42,35 @@ function validateFile(file: File): string | null {
   return null;
 }
 
+/** Length of a local video file in seconds, or null if this browser cannot read it. */
+function readDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const done = (value: number | null) => {
+      window.clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      resolve(value);
+    };
+    const timer = window.setTimeout(() => done(null), 5000);
+    video.preload = "metadata";
+    video.muted = true;
+    video.onloadedmetadata = () => done(Number.isFinite(video.duration) ? video.duration : null);
+    video.onerror = () => done(null);
+    video.src = url;
+  });
+}
+
+async function validateLength(file: File): Promise<string | null> {
+  // The analysis service checks too; this saves uploading a long file only to have it refused.
+  const seconds = await readDuration(file);
+  if (seconds !== null && seconds > MAX_VIDEO_SECONDS + 0.05) {
+    return `This video is ${seconds.toFixed(1)} seconds long. The limit is ${MAX_VIDEO_SECONDS} seconds: trim it to just the swing (on an iPhone: Edit, then drag the ends of the timeline).`;
+  }
+  return null;
+}
+
 const ANGLES: { value: CameraAngle; title: string; text: string }[] = [
   {
     value: "face_on",
@@ -67,11 +97,24 @@ export default function AnalyseSwing() {
   const [progress, setProgress] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  function pick(f: File | undefined) {
+  const [checking, setChecking] = useState(false);
+  const picked = useRef<File | null>(null);
+
+  async function pick(f: File | undefined) {
     if (!f) return;
+    picked.current = f;
     const problem = validateFile(f);
-    setFileError(problem);
-    setFile(problem ? null : f);
+    if (problem) {
+      setFileError(problem);
+      setFile(null);
+      return;
+    }
+    setChecking(true);
+    const tooLong = await validateLength(f);
+    if (picked.current !== f) return; // another file was picked meanwhile
+    setChecking(false);
+    setFileError(tooLong);
+    setFile(tooLong ? null : f);
   }
 
   function onDrop(e: DragEvent) {
@@ -80,7 +123,7 @@ export default function AnalyseSwing() {
     pick(e.dataTransfer.files[0]);
   }
 
-  const missing = !file ? "Choose a video" : !angle ? "Choose a camera angle" : !hand ? "Choose your handedness" : null;
+  const missing = checking ? "Checking the video…" : !file ? "Choose a video" : !angle ? "Choose a camera angle" : !hand ? "Choose your handedness" : null;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -107,7 +150,7 @@ export default function AnalyseSwing() {
       <div className="space-y-5">
         <header className="mb-2">
           <h1 className="text-3xl">Analyse a swing</h1>
-          <p className="mt-1 text-mute">Three quick steps, then the analysis takes about a minute.</p>
+          <p className="mt-1 text-mute">Three quick steps, then the analysis runs on its own.</p>
         </header>
 
         <Step n={1} title="Choose your video" done={file !== null}>
@@ -142,7 +185,9 @@ export default function AnalyseSwing() {
             ) : (
               <>
                 <p className="mt-3 font-medium">Drop your video here, or click to browse</p>
-                <p className="text-sm text-mute">MP4 or MOV, just the swing (a few seconds)</p>
+                <p className="text-sm text-mute">
+                  MP4 or MOV, just the swing (at most {MAX_VIDEO_SECONDS} seconds)
+                </p>
               </>
             )}
           </div>
@@ -224,7 +269,9 @@ export default function AnalyseSwing() {
           <button type="submit" disabled={uploading || missing !== null} className="btn btn-primary px-6 py-3">
             {uploading ? `Uploading… ${Math.round(progress * 100)}%` : "Start analysis"}
           </button>
-          {missing && !uploading && <p className="text-sm text-mute">{missing} to continue.</p>}
+          {missing && !uploading && (
+            <p className="text-sm text-mute">{checking ? missing : `${missing} to continue.`}</p>
+          )}
           {submitError && (
             <p role="alert" className="text-sm text-bad">
               {submitError}

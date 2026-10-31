@@ -36,9 +36,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pose model (lite | full | heavy). "full" is a good CPU default; "heavy" is more
-# accurate on fast motion but noticeably slower.
-ARG POSE_MODEL_VARIANT=full
+# Pose model (lite | full | heavy). "heavy": about 2.7x slower per frame than "full" (70 vs 26 ms
+# on an M-series Mac), but from down-the-line it keeps the arms apart at the top of the swing and
+# places the trail elbow where it is; "full" swapped left and right arm there.
+ARG POSE_MODEL_VARIANT=heavy
 RUN mkdir -p /app/models \
     && curl -fsSL -o /app/models/pose_landmarker_${POSE_MODEL_VARIANT}.task \
        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${POSE_MODEL_VARIANT}/float16/latest/pose_landmarker_${POSE_MODEL_VARIANT}.task"

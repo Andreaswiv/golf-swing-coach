@@ -223,6 +223,8 @@ export const CLUBS = [
 ] as const;
 
 export const MAX_UPLOAD_MB = 500;
+/** Longest video accepted. Keep in sync with MAX_VIDEO_SECONDS in cv-service/app/pipeline.py. */
+export const MAX_VIDEO_SECONDS = 15;
 export const ACCEPTED_EXTENSIONS = [".mp4", ".mov", ".m4v"];
 
 export function formatDuration(seconds: number | null): string {

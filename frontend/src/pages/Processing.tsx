@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Analysis } from "../api";
 import QualityReportView from "../components/QualityReportView";
-import { AlertIcon, CheckIcon } from "../components/icons";
+import { AlertIcon, CheckIcon, ClockIcon } from "../components/icons";
 
 // The stages the computer-vision service reports, in order.
 const STAGES = [
@@ -40,10 +40,28 @@ function stageIndex(a: Analysis): number {
 
 const POLL_MS = 1000;
 
+function elapsedSince(iso: string, now: number): string {
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Re-render every second while `active`, for the elapsed-time clock. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
 export default function Processing() {
   const { id = "" } = useParams();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const running = analysis?.status === "queued" || analysis?.status === "processing";
+  const now = useNow(running);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +109,7 @@ export default function Processing() {
         </h1>
         <p className="mt-1 truncate text-sm text-mute">{analysis.video.originalFileName}</p>
 
+
         {!failed && (
           <div aria-live="polite" className="mt-6">
             <div
@@ -106,7 +125,15 @@ export default function Processing() {
                 style={{ width: `${analysis.progress}%` }}
               />
             </div>
-            <p className="tnum mt-2 text-sm text-mute">{analysis.progress}%</p>
+            <p className="tnum mt-2 flex items-center justify-between text-sm text-mute">
+              <span>{analysis.progress}%</span>
+              {running && (
+                <span className="flex items-center gap-1.5" aria-label={`Running for ${elapsedSince(analysis.createdAt, now)}`}>
+                  <ClockIcon className="h-4 w-4" />
+                  {elapsedSince(analysis.createdAt, now)}
+                </span>
+              )}
+            </p>
 
             <ol className="mt-5 space-y-3">
               {STAGES.slice(1).map((s, j) => {
