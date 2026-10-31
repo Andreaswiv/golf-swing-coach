@@ -23,18 +23,17 @@ export function boundsOf(poses: (Pose | null)[], extra: [number, number][] = [],
 }
 
 /**
- * Frame index playing through `count` frames over `swingMs`. With `once` it plays a single time and
- * holds the last frame, and plays again each time the element comes back after leaving the screen
- * completely; otherwise it holds the last frame for `holdMs` and starts again. Only runs while
- * `ref`'s element is on screen and the tab is visible.
+ * Playback progress from 0 to 1 over `durationMs`, updated every animation frame (so the figure can be
+ * drawn between data frames). With `once` it plays a single time and holds at 1, and plays again each
+ * time the element comes back after leaving the screen completely; otherwise it holds for `holdMs`
+ * and starts again. Only runs while `ref`'s element is on screen and the tab is visible.
  */
-export function useSwingPlayback(
-  count: number,
-  swingMs: number,
+export function useSwingClock(
+  durationMs: number,
   ref: RefObject<Element | null>,
   { once = false, holdMs = 0 }: { once?: boolean; holdMs?: number } = {},
 ) {
-  const [index, setIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(false);
   const [finished, setFinished] = useState(false);
 
@@ -59,26 +58,24 @@ export function useSwingPlayback(
   }, [ref]);
 
   useEffect(() => {
-    if (count <= 0) return;
-    if (reducedMotion()) return setIndex(count - 1);
+    if (reducedMotion()) return setProgress(1);
     if (!visible || finished) return;
     let frame = 0;
     const start = performance.now();
     const tick = (now: number) => {
       const elapsed = now - start;
-      if (once && elapsed >= swingMs) {
-        setIndex(count - 1);
+      if (once && elapsed >= durationMs) {
+        setProgress(1);
         setFinished(true);
         return;
       }
-      const t = elapsed % (swingMs + holdMs);
-      setIndex(Math.min(count - 1, Math.floor((t / swingMs) * count))); // same value: React skips the render
+      setProgress(Math.min(1, (elapsed % (durationMs + holdMs)) / durationMs));
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [count, swingMs, holdMs, once, visible, finished]);
-  return index;
+  }, [durationMs, holdMs, once, visible, finished]);
+  return progress;
 }
 
 const LIMBS: [JointName, JointName, number][] = [
@@ -93,6 +90,23 @@ const LIMBS: [JointName, JointName, number][] = [
   ["rk", "ra", 0.18],
 ];
 const JOINTS: JointName[] = ["ls", "rs", "le", "re", "lh", "rh", "lk", "rk"];
+
+/**
+ * A smooth curve through the points (Catmull-Rom spline as cubic Béziers): the trail flows through
+ * every club-head position instead of turning a corner at each one.
+ */
+export function smoothPath(points: [number, number][]): string {
+  if (points.length < 2) return "";
+  const p = (i: number) => points[Math.max(0, Math.min(points.length - 1, i))];
+  let d = `M${p(0)[0].toFixed(1)} ${p(0)[1].toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const [p0, p1, p2, p3] = [p(i - 1), p(i), p(i + 1), p(i + 2)];
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ` C${c1[0].toFixed(1)} ${c1[1].toFixed(1)} ${c2[0].toFixed(1)} ${c2[1].toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
 
 export const torsoLength = (p: Pose) =>
   Math.hypot((p.ls[0] + p.rs[0] - p.lh[0] - p.rh[0]) / 2, (p.ls[1] + p.rs[1] - p.lh[1] - p.rh[1]) / 2);
@@ -125,23 +139,28 @@ export function PoseFigure({ pose, box, club, trail = [], label = "A figure movi
   const head = [pose.nose[0], pose.nose[1] - torso * 0.05];
   const neck = mid("ls", "rs");
   const torsoPath = (["ls", "rs", "rh", "lh"] as JointName[]).map((j, i) => `${i ? "L" : "M"}${pose[j][0]} ${pose[j][1]}`).join(" ") + " Z";
-  const trailPts = trail.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const trailPath = smoothPath(trail);
+  const [tail, tip] = [trail[0], trail[trail.length - 1]];
 
   return (
     <svg viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`} className="size-full overflow-visible" role="img" aria-label={label}>
       <defs>
-        <linearGradient id={`${uid}-trail`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#ffd59a" />
-          <stop offset="1" stopColor="#ff8a3d" />
-        </linearGradient>
+        {/* From the oldest point (faded out) to the club head (bright): a trace of light. */}
+        {trail.length > 1 && (
+          <linearGradient id={`${uid}-trail`} gradientUnits="userSpaceOnUse" x1={tail[0]} y1={tail[1]} x2={tip[0]} y2={tip[1]}>
+            <stop offset="0" stopColor="#ffb066" stopOpacity="0" />
+            <stop offset="0.45" stopColor="#ff9a4d" stopOpacity="0.55" />
+            <stop offset="1" stopColor="#ffd59a" stopOpacity="1" />
+          </linearGradient>
+        )}
       </defs>
 
       {trail.length > 1 && (
         <g fill="none" strokeLinecap="round" strokeLinejoin="round">
           {/* Glow: wide, faint strokes under the line (a blur filter would be recomputed every frame). */}
-          <polyline points={trailPts} stroke="#ff9a4d" strokeOpacity="0.12" strokeWidth={torso * 0.22} />
-          <polyline points={trailPts} stroke="#ff9a4d" strokeOpacity="0.22" strokeWidth={torso * 0.11} />
-          <polyline points={trailPts} stroke={`url(#${uid}-trail)`} strokeWidth={torso * 0.035} />
+          <path d={trailPath} stroke={`url(#${uid}-trail)`} strokeOpacity="0.18" strokeWidth={torso * 0.22} />
+          <path d={trailPath} stroke={`url(#${uid}-trail)`} strokeOpacity="0.35" strokeWidth={torso * 0.11} />
+          <path d={trailPath} stroke={`url(#${uid}-trail)`} strokeWidth={torso * 0.035} />
         </g>
       )}
 
