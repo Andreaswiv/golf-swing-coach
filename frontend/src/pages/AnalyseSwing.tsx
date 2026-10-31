@@ -1,4 +1,4 @@
-import React, { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ACCEPTED_EXTENSIONS,
@@ -9,24 +9,31 @@ import {
   type CameraAngle,
   type Handedness,
 } from "../api";
-import CameraDiagram from "../components/CameraDiagram";
-import { CameraIcon, CheckIcon, LockIcon, UploadIcon } from "../components/icons";
+import { Camera, Check, Lock, Upload } from "lucide-react";
+import CameraDiagram from "@/components/CameraDiagram";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
 
-function Step({ n, title, children, done }: { n: number; title: string; children: React.ReactNode; done: boolean }) {
+function Step({ n, title, children, done }: { n: number; title: string; children: ReactNode; done: boolean }) {
   return (
-    <section className="card p-5 sm:p-6" aria-labelledby={`step-${n}`}>
-      <h2 id={`step-${n}`} className="flex items-center gap-3 text-lg">
+    <Card className="gap-4 p-6" aria-labelledby={`step-${n}`} role="group">
+      <h2 id={`step-${n}`} className="flex items-center gap-3 text-base">
         <span
-          className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
-            done ? "bg-brand text-white" : "bg-subtle text-mute"
-          }`}
+          className={cn(
+            "flex size-7 items-center justify-center rounded-full text-sm font-semibold transition-colors",
+            done ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+          )}
         >
-          {done ? <CheckIcon className="h-4 w-4" /> : n}
+          {done ? <Check className="size-4" /> : n}
         </span>
         {title}
       </h2>
-      <div className="mt-4">{children}</div>
-    </section>
+      <div>{children}</div>
+    </Card>
   );
 }
 
@@ -70,6 +77,9 @@ async function validateLength(file: File): Promise<string | null> {
   }
   return null;
 }
+
+/** Select items cannot have an empty value, so "no club" has its own. */
+const NO_CLUB = "none";
 
 const ANGLES: { value: CameraAngle; title: string; text: string }[] = [
   {
@@ -141,16 +151,17 @@ export default function AnalyseSwing() {
   }
 
   const optionCls = (selected: boolean) =>
-    `cursor-pointer rounded-xl border-2 transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-brand ${
-      selected ? "border-brand bg-brand-soft/60" : "border-line bg-surface hover:border-mute/50"
-    }`;
+    cn(
+      "cursor-pointer rounded-xl border bg-card transition-[border-color,box-shadow] has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50",
+      selected ? "border-leaf-4 shadow-[0_0_0_1px_var(--leaf-4)]" : "hover:border-muted-foreground/40",
+    );
 
   return (
     <form onSubmit={onSubmit} className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_19rem]">
-      <div className="space-y-5">
-        <header className="mb-2">
-          <h1 className="text-3xl">Analyse a swing</h1>
-          <p className="mt-1 text-mute">Three quick steps, then the analysis runs on its own.</p>
+      <div className="space-y-4">
+        <header className="mb-4">
+          <h1 className="text-2xl">Analyse a swing</h1>
+          <p className="mt-1 text-muted-foreground">Three quick steps, then the analysis runs on its own.</p>
         </header>
 
         <Step n={1} title="Choose your video" done={file !== null}>
@@ -162,9 +173,10 @@ export default function AnalyseSwing() {
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
             onClick={() => inputRef.current?.click()}
-            className={`flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
-              dragging ? "border-brand bg-brand-soft" : file ? "border-brand/40 bg-brand-soft/40" : "border-line bg-canvas hover:border-mute/50"
-            }`}
+            className={cn(
+              "flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
+              dragging ? "border-leaf-4 bg-brand-soft" : file ? "border-leaf-3 bg-brand-soft/60" : "bg-muted/50 hover:border-muted-foreground/40",
+            )}
           >
             <input
               ref={inputRef}
@@ -174,25 +186,23 @@ export default function AnalyseSwing() {
               onChange={(e) => pick(e.target.files?.[0])}
               aria-label="Swing video file"
             />
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface text-brand shadow-sm">
-              {file ? <CheckIcon /> : <UploadIcon />}
+            <span className="flex size-11 items-center justify-center rounded-full border bg-card text-leaf-5 shadow-xs">
+              {file ? <Check className="size-5" /> : <Upload className="size-5" />}
             </span>
             {file ? (
               <>
                 <p className="mt-3 font-medium">{file.name}</p>
-                <p className="tnum text-sm text-mute">{(file.size / 1024 / 1024).toFixed(1)} MB · click to change</p>
+                <p className="tnum text-sm text-muted-foreground">{(file.size / 1024 / 1024).toFixed(1)} MB · click to change</p>
               </>
             ) : (
               <>
                 <p className="mt-3 font-medium">Drop your video here, or click to browse</p>
-                <p className="text-sm text-mute">
-                  MP4 or MOV, just the swing (at most {MAX_VIDEO_SECONDS} seconds)
-                </p>
+                <p className="text-sm text-muted-foreground">MP4 or MOV, just the swing (at most {MAX_VIDEO_SECONDS} seconds)</p>
               </>
             )}
           </div>
           {fileError && (
-            <p role="alert" className="mt-2 text-sm text-bad">
+            <p role="alert" className="mt-2 text-sm text-destructive">
               {fileError}
             </p>
           )}
@@ -203,7 +213,7 @@ export default function AnalyseSwing() {
             <legend className="sr-only">Camera angle</legend>
             <div className="grid gap-3 sm:grid-cols-2">
               {ANGLES.map((a) => (
-                <label key={a.value} className={`${optionCls(angle === a.value)} p-4`}>
+                <label key={a.value} className={cn(optionCls(angle === a.value), "p-4")}>
                   <input
                     type="radio"
                     name="angle"
@@ -212,11 +222,11 @@ export default function AnalyseSwing() {
                     onChange={() => setAngle(a.value)}
                     className="sr-only"
                   />
-                  <span className="block rounded-lg bg-canvas">
+                  <span className="block rounded-lg bg-muted">
                     <CameraDiagram angle={a.value} />
                   </span>
                   <span className="mt-3 block font-semibold">{a.title}</span>
-                  <span className="block text-sm text-mute">{a.text}</span>
+                  <span className="block text-sm text-muted-foreground">{a.text}</span>
                 </label>
               ))}
             </div>
@@ -225,84 +235,84 @@ export default function AnalyseSwing() {
 
         <Step n={3} title="About your swing" done={hand !== null}>
           <div className="grid gap-5 sm:grid-cols-2">
-            <fieldset>
-              <legend className="text-sm font-medium">Handedness</legend>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {(["right", "left"] as const).map((h) => (
-                  <label key={h} className={`${optionCls(hand === h)} px-3 py-2.5 text-center text-sm font-medium`}>
-                    <input
-                      type="radio"
-                      name="hand"
-                      value={h}
-                      checked={hand === h}
-                      onChange={() => setHand(h)}
-                      className="sr-only"
-                    />
-                    {h === "right" ? "Right-handed" : "Left-handed"}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            <div>
-              <label htmlFor="club" className="block text-sm font-medium">
-                Club <span className="font-normal text-mute">(optional)</span>
-              </label>
-              <select
-                id="club"
-                value={club}
-                onChange={(e) => setClub(e.target.value)}
-                className="mt-2 w-full rounded-xl border-2 border-line bg-surface px-3 py-2.5 text-sm"
+            <div className="space-y-2">
+              <Label id="hand-label">Handedness</Label>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                aria-labelledby="hand-label"
+                value={hand ?? ""}
+                onValueChange={(v) => v && setHand(v as Handedness)}
+                className="w-full"
               >
-                <option value="">Not specified</option>
-                {CLUBS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+                <ToggleGroupItem value="right" className="flex-1">
+                  Right-handed
+                </ToggleGroupItem>
+                <ToggleGroupItem value="left" className="flex-1">
+                  Left-handed
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="club">
+                Club <span className="font-normal text-muted-foreground">(optional)</span>
+              </Label>
+              <Select value={club || NO_CLUB} onValueChange={(v) => setClub(v === NO_CLUB ? "" : v)}>
+                <SelectTrigger id="club" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CLUB}>Not specified</SelectItem>
+                  {CLUBS.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </Step>
 
         <div className="flex flex-wrap items-center gap-4 pt-2">
-          <button type="submit" disabled={uploading || missing !== null} className="btn btn-primary px-6 py-3">
+          <Button type="submit" size="lg" disabled={uploading || missing !== null} className="min-w-40">
             {uploading ? `Uploading… ${Math.round(progress * 100)}%` : "Start analysis"}
-          </button>
+          </Button>
           {missing && !uploading && (
-            <p className="text-sm text-mute">{checking ? missing : `${missing} to continue.`}</p>
+            <p className="text-sm text-muted-foreground">{checking ? missing : `${missing} to continue.`}</p>
           )}
           {submitError && (
-            <p role="alert" className="text-sm text-bad">
+            <p role="alert" className="text-sm text-destructive">
               {submitError}
             </p>
           )}
         </div>
       </div>
 
-      <aside className="space-y-4 lg:pt-[4.5rem]">
-        <div className="card p-5">
+      <aside className="space-y-4 lg:pt-[4.25rem]">
+        <Card className="gap-3 p-6">
           <h2 className="flex items-center gap-2 text-base">
-            <CameraIcon className="h-5 w-5 text-brand" />
+            <Camera className="size-5 text-leaf-4" />
             Tips for a good video
           </h2>
-          <ul className="mt-3 space-y-2.5 text-sm text-mute">
+          <ul className="space-y-2.5 text-sm text-muted-foreground">
             {[
-              "Record at 60 fps or more; 120 fps is better. Slow motion works, but then tempo can\u2019t be measured.",
+              "Record at 60 fps or more; 120 fps is better. Slow motion works too: trim off the normal-speed start and end so the swing plays at one speed.",
               "Keep your whole body and the club in frame.",
               "Use a tripod or lean the phone against your bag.",
               "Film in good light with only you in the shot.",
               "Stand the camera at hip height, about 3 metres away.",
             ].map((t) => (
               <li key={t} className="flex gap-2">
-                <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+                <Check className="mt-0.5 size-4 shrink-0 text-leaf-4" />
                 {t}
               </li>
             ))}
           </ul>
-        </div>
-        <p className="flex gap-2 px-1 text-sm text-mute">
-          <LockIcon className="mt-0.5 h-4 w-4 shrink-0" />
+        </Card>
+        <p className="flex gap-2 px-1 text-sm text-muted-foreground">
+          <Lock className="mt-0.5 size-4 shrink-0" />
           Your video is stored on this computer only. You can delete it at any time.
         </p>
       </aside>

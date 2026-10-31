@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import type { ClubSummary, ClubTrackPoint, SwingPhase } from "../api";
+import { ChevronLeft, ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
+import type { ClubSummary, ClubTrackPoint, SwingPhase } from "@/api";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { cn } from "@/lib/utils";
 import {
   CONFIDENT_VISIBILITY,
   JOINTS,
@@ -14,8 +22,7 @@ import {
   type ShaftLine,
   type Side,
 } from "../keypoints";
-import { PHASE_HINT, PHASE_LABEL } from "../swingLabels";
-import { ChevronLeft, ChevronRight, ExpandIcon, PauseIcon, PlayIcon, ShrinkIcon } from "./icons";
+import { PHASE_HINT, PHASE_LABEL } from "@/swingLabels";
 
 const SPEEDS = [0.1, 0.25, 0.5, 1];
 
@@ -159,15 +166,45 @@ export default function SwingPlayer({
 
     let presentedSinceSeek = true;
     let fallback = 0;
-    if (frameCallbacks) {
-      const onFrame = (_now: number, meta: VideoFrameCallbackMetadata) => {
-        if (stopped) return;
-        presentedSinceSeek = true;
-        presentedTime.current = meta.mediaTime;
-        draw(meta.mediaTime);
-        handle = video.requestVideoFrameCallback(onFrame);
-      };
+    let lastFrameAt = 0;
+    let watchdog = 0;
+    // (Re)arm the frame callback. Browsers occasionally drop a pending one (Safari around pause/play,
+    // any browser while re-buffering); the chain would then stop and leave the overlay frozen.
+    const arm = () => {
+      if (stopped || !frameCallbacks) return;
+      video.cancelVideoFrameCallback(handle);
       handle = video.requestVideoFrameCallback(onFrame);
+    };
+    const onFrame = (_now: number, meta: VideoFrameCallbackMetadata) => {
+      if (stopped) return;
+      // Re-register first: if drawing ever throws, the chain must not break with it.
+      handle = video.requestVideoFrameCallback(onFrame);
+      lastFrameAt = performance.now();
+      presentedSinceSeek = true;
+      presentedTime.current = meta.mediaTime;
+      draw(meta.mediaTime);
+    };
+    // While playing: if no frame has been reported for a while, draw from the clock and re-arm.
+    const watch = () => {
+      if (stopped || video.paused || video.ended) return;
+      if (performance.now() - lastFrameAt > 250) {
+        presentedTime.current = video.currentTime;
+        draw(video.currentTime);
+        lastFrameAt = performance.now();
+        arm();
+      }
+      watchdog = requestAnimationFrame(watch);
+    };
+    const onPlay = () => {
+      lastFrameAt = performance.now();
+      arm();
+      cancelAnimationFrame(watchdog);
+      watchdog = requestAnimationFrame(watch);
+    };
+    if (frameCallbacks) {
+      arm();
+      video.addEventListener("play", onPlay);
+      video.addEventListener("playing", onPlay);
     } else {
       const onTick = () => {
         if (stopped) return;
@@ -203,8 +240,11 @@ export default function SwingPlayer({
 
     return () => {
       stopped = true;
-      if ("cancelVideoFrameCallback" in video) video.cancelVideoFrameCallback(handle);
+      if (frameCallbacks) video.cancelVideoFrameCallback(handle);
       else cancelAnimationFrame(handle);
+      cancelAnimationFrame(watchdog);
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("playing", onPlay);
       window.clearTimeout(fallback);
       video.removeEventListener("seeking", onSeeking);
       video.removeEventListener("seeked", onSeeked);
@@ -308,9 +348,10 @@ export default function SwingPlayer({
             stepFrames(e.key === "ArrowLeft" ? -1 : 1);
           }
         }}
-        className={`flex flex-col overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-brand ${
-          fullscreen ? "h-full w-full" : "rounded-2xl shadow-[var(--shadow-card)]"
-        }`}
+        className={cn(
+          "flex flex-col overflow-hidden bg-black outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+          fullscreen ? "h-full w-full" : "rounded-[24px]",
+        )}
       >
         <div className="relative min-h-0 flex-1">
           <video
@@ -332,58 +373,60 @@ export default function SwingPlayer({
 
         {/* Below the video, not on top of it: it would cover the feet and the ball. */}
         <div className="flex items-center gap-3 px-3 py-2 text-white">
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={togglePlay}
-            className="rounded-lg p-1.5 transition-colors hover:bg-white/15"
+            className="text-white hover:bg-white/15 hover:text-white"
             aria-label={playing ? "Pause" : "Play"}
           >
-            {playing ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
-          </button>
-          <span className="tnum shrink-0 text-xs text-white/80">
+            {playing ? <Pause className="size-5" /> : <Play className="size-5 fill-current" />}
+          </Button>
+          <span className="tnum shrink-0 font-mono text-[11px] text-white/80">
             {(scrubTo ?? shownSeconds).toFixed(2)} / {duration.toFixed(2)} s
           </span>
-          <input
-            type="range"
+          <Slider
             min={0}
-            max={duration || 0}
-            step="any"
-            value={Math.min(scrubTo ?? shownSeconds, duration || 0)}
+            max={duration || 1}
+            step={0.001}
+            value={[Math.min(scrubTo ?? shownSeconds, duration || 0)]}
             aria-label="Position in the video"
-            onChange={(e) => {
-              const t = Number(e.target.value);
+            onValueChange={([t]) => {
               setScrubTo(t);
               if (videoRef.current) videoRef.current.currentTime = t;
             }}
-            onPointerUp={() => setScrubTo(null)}
-            onKeyUp={() => setScrubTo(null)}
+            onValueCommit={() => setScrubTo(null)}
             onBlur={() => setScrubTo(null)}
-            className="h-1.5 min-w-0 flex-1 cursor-pointer accent-[var(--color-brand)]"
+            className="min-w-0 flex-1 cursor-pointer [&_[data-slot=slider-range]]:bg-white [&_[data-slot=slider-thumb]]:size-3.5 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-track]]:bg-white/25"
           />
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={toggleFullscreen}
-            className="rounded-lg p-1.5 transition-colors hover:bg-white/15"
+            className="text-white hover:bg-white/15 hover:text-white"
             aria-label={fullscreen ? "Exit full screen" : "Full screen"}
             title={fullscreen ? "Exit full screen" : "Full screen (with the overlay)"}
           >
-            {fullscreen ? <ShrinkIcon className="h-5 w-5" /> : <ExpandIcon className="h-5 w-5" />}
-          </button>
+            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+          </Button>
         </div>
       </div>
 
-      <div className="card space-y-4 p-4">
+      <Card className="gap-4 p-5">
         {phases.length > 0 && clipEnd > 0 && (
           <div aria-label="Swing phases">
-            <div className="relative mx-2 h-1.5 rounded-full bg-subtle">
+            <div className="relative mx-2 h-1.5 rounded-full bg-muted">
               <div
-                className="absolute inset-y-0 left-0 rounded-full bg-brand/30"
+                className="absolute inset-y-0 left-0 rounded-full bg-leaf-2"
                 style={{ width: `${Math.min(100, ((current?.t ?? 0) / clipEnd) * 100)}%` }}
               />
               {phases.map((p) => (
                 <span
                   key={p.name}
-                  className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-surface ${
-                    currentPhase?.name === p.name ? "bg-brand" : "bg-mute/50"
-                  }`}
+                  className={cn(
+                    "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card",
+                    currentPhase?.name === p.name ? "bg-leaf-4" : "bg-muted-foreground/40",
+                  )}
                   style={{ left: `${(p.timestamp_s / clipEnd) * 100}%` }}
                 />
               ))}
@@ -397,12 +440,13 @@ export default function SwingPlayer({
                     onClick={() => seekToFrame(p.frame_index)}
                     title={PHASE_HINT[p.name]}
                     aria-pressed={active}
-                    className={`rounded-lg px-1 py-1.5 text-center text-xs transition-colors sm:text-sm ${
-                      active ? "bg-brand text-white" : "bg-subtle text-mute hover:text-ink"
-                    }`}
+                    className={cn(
+                      "rounded-lg px-1 py-1.5 text-center text-xs transition-colors sm:text-sm",
+                      active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
+                    )}
                   >
                     <span className="block font-semibold">{PHASE_LABEL[p.name]}</span>
-                    <span className={`tnum block text-[0.7rem] ${active ? "text-white/75" : "text-mute"}`}>
+                    <span className={cn("tnum block text-[0.7rem]", active ? "text-primary-foreground/70" : "text-muted-foreground")}>
                       {p.timestamp_s.toFixed(2)} s{p.confidence < 0.5 ? " ?" : ""}
                     </span>
                   </button>
@@ -415,72 +459,48 @@ export default function SwingPlayer({
         <div className="flex flex-wrap items-center justify-between gap-3">
           {keypoints ? (
             <div className="flex items-center gap-1">
-              <button onClick={() => stepFrames(-1)} className="btn-quiet rounded-lg" aria-label="Previous frame">
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <span className="tnum min-w-[6.5rem] text-center text-xs text-mute">
+              <Button variant="ghost" size="icon-sm" onClick={() => stepFrames(-1)} aria-label="Previous frame">
+                <ChevronLeft className="size-5" />
+              </Button>
+              <span className="tnum min-w-[6.5rem] text-center text-xs text-muted-foreground">
                 Frame {current ? current.i + 1 : "–"} / {frames.length}
               </span>
-              <button onClick={() => stepFrames(1)} className="btn-quiet rounded-lg" aria-label="Next frame">
-                <ChevronRight className="h-5 w-5" />
-              </button>
+              <Button variant="ghost" size="icon-sm" onClick={() => stepFrames(1)} aria-label="Next frame">
+                <ChevronRight className="size-5" />
+              </Button>
             </div>
           ) : (
             <span />
           )}
-          <div className="seg" role="group" aria-label="Playback speed">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            aria-label="Playback speed"
+            value={String(speed)}
+            onValueChange={(v) => v && setSpeed(Number(v))}
+          >
             {SPEEDS.map((s) => (
-              <button key={s} onClick={() => setSpeed(s)} aria-pressed={speed === s} className="tnum">
+              <ToggleGroupItem key={s} value={String(s)} className="tnum px-2.5">
                 {s}×
-              </button>
+              </ToggleGroupItem>
             ))}
-          </div>
+          </ToggleGroup>
         </div>
 
         {keypoints && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-3 text-sm">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={showSkeleton}
-                onChange={(e) => setShowSkeleton(e.target.checked)}
-                className="h-4 w-4 accent-[var(--color-brand)]"
-              />
-              Skeleton
-            </label>
-            <label className={`flex cursor-pointer items-center gap-2 ${showSkeleton ? "" : "opacity-50"}`}>
-              <input
-                type="checkbox"
-                checked={hideUncertain}
-                disabled={!showSkeleton}
-                onChange={(e) => setHideUncertain(e.target.checked)}
-                className="h-4 w-4 accent-[var(--color-brand)]"
-              />
-              Hide hidden joints
-            </label>
-            {clubTracked && (
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={showClub}
-                  onChange={(e) => setShowClub(e.target.checked)}
-                  className="h-4 w-4 accent-[var(--color-brand)]"
-                />
-                Club
-              </label>
-            )}
-            {plane && (
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={showPlane}
-                  onChange={(e) => setShowPlane(e.target.checked)}
-                  className="h-4 w-4 accent-[var(--color-brand)]"
-                />
-                Swing plane
-              </label>
-            )}
-            <span className="flex flex-wrap items-center gap-3 text-xs text-mute">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t pt-4 text-sm">
+            <OverlaySwitch id="ov-skeleton" label="Skeleton" checked={showSkeleton} onChange={setShowSkeleton} />
+            <OverlaySwitch
+              id="ov-hidden"
+              label="Hide hidden joints"
+              checked={hideUncertain}
+              onChange={setHideUncertain}
+              disabled={!showSkeleton}
+            />
+            {clubTracked && <OverlaySwitch id="ov-club" label="Club" checked={showClub} onChange={setShowClub} />}
+            {plane && <OverlaySwitch id="ov-plane" label="Swing plane" checked={showPlane} onChange={setShowPlane} />}
+            <span className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               <Legend color={COLORS.left} label="Left side" />
               <Legend color={COLORS.right} label="Right side" />
               {clubTracked && <Legend color={CLUB_COLOR} label="Club" />}
@@ -489,28 +509,51 @@ export default function SwingPlayer({
           </div>
         )}
         {current && clubTracked && showClub && !clubLineAt(current, frameIndex, clubTrack, aspect) && (
-          <p className="text-sm text-mute">
+          <p className="text-sm text-muted-foreground">
             {current.club ? "The club was not found in this frame." : "The club is only tracked around the swing."}
           </p>
         )}
 
-        {current && !current.lm && <p className="text-sm text-bad">No person was detected in this frame.</p>}
+        {current && !current.lm && <p className="text-sm text-destructive">No person was detected in this frame.</p>}
         {current && current.lm && current.n > 1 && (
           <p className="text-sm text-warn">{current.n} people detected here; showing the one chosen as the golfer.</p>
         )}
         {aspectMismatch && (
-          <p role="alert" className="text-sm text-bad">
+          <p role="alert" className="text-sm text-destructive">
             The browser shows this video in a different orientation than the one analysed, so the skeleton may not
             line up.
           </p>
         )}
         {loadError && (
-          <p role="alert" className="text-sm text-bad">
+          <p role="alert" className="text-sm text-destructive">
             Skeleton unavailable: {loadError}
           </p>
         )}
-      </div>
+      </Card>
     </div>
+  );
+}
+
+function OverlaySwitch({
+  id,
+  label,
+  checked,
+  onChange,
+  disabled = false,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <span className={cn("flex items-center gap-2", disabled && "opacity-50")}>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
+      <Label htmlFor={id} className="cursor-pointer font-normal">
+        {label}
+      </Label>
+    </span>
   );
 }
 

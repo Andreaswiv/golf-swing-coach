@@ -1,159 +1,237 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-@theme {
-  /* Surfaces and text */
-  --color-canvas: #f3f4ef;
-  --color-surface: #ffffff;
-  --color-subtle: #eceee6;
-  --color-line: #dfe3d8;
-  --color-ink: #16201a;
-  --color-mute: #5b675e;
+/* Aspekta (SIL Open Font License, public/fonts/aspekta/OFL.txt): the cinematic homepage. */
+@font-face {
+  font-family: "Aspekta";
+  src: url("/fonts/aspekta/Aspekta-300.woff2") format("woff2");
+  font-weight: 300;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aspekta";
+  src: url("/fonts/aspekta/Aspekta-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aspekta";
+  src: url("/fonts/aspekta/Aspekta-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Aspekta";
+  src: url("/fonts/aspekta/Aspekta-900.woff2") format("woff2");
+  font-weight: 900;
+  font-display: swap;
+}
 
-  /* Brand: fairway green */
-  --color-brand: #1d6a43;
-  --color-brand-deep: #134a2e;
-  --color-brand-soft: #e2efe6;
+/*
+  Theme: shadcn/ui variables (https://ui.shadcn.com/docs/theming) on a light "paper" palette with one
+  blue ramp for highlights and charts. Components in components/ui read these.
+*/
+:root {
+  --radius: 0.75rem;
 
-  /* Feedback tones */
-  --color-good: #1c7f47;
-  --color-good-soft: #e3f3e8;
-  --color-warn: #a86b12;
-  --color-warn-soft: #fbf0d9;
-  --color-bad: #b9432a;
-  --color-bad-soft: #fbe6df;
+  --background: #f7f7f5;
+  --foreground: #111111;
+  --card: #efefed; /* soft grey cards, no border or shadow (as on the homepage) */
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #111111;
+  --primary-foreground: #ffffff;
+  --secondary: #e4e4e0;
+  --secondary-foreground: #111111;
+  --muted: #e4e4e0; /* wells and tracks, a step darker than the cards */
+  --muted-foreground: #5f5f5b;
+  --accent: #e4e4e0;
+  --accent-foreground: #111111;
+  --destructive: #c4372b;
+  --border: #dededa;
+  --input: #d6d6d1;
+  --ring: #4f8a45;
 
-  /* Skeleton on video (must stand out on grass and sky). Not named "left"/"right": Tailwind would
+  /* One green ramp, light to deep (the homepage's greens): selection, progress, charts. */
+  --leaf-1: #e2efdc;
+  --leaf-2: #bfdfae;
+  --leaf-3: #8fc777;
+  --leaf-4: #4f8a45;
+  --leaf-5: #1f4d2e;
+  /* The dark green of the homepage hero and the analysis header. */
+  --forest: #1a3d29;
+
+  /* Feedback tones (ratings, verdicts). */
+  --good: #16834a;
+  --good-soft: #e6f5ec;
+  --warn: #a86b12;
+  --warn-soft: #fbf0d9;
+  --bad: #c4372b;
+  --bad-soft: #fbe7e3;
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-leaf-1: var(--leaf-1);
+  --color-leaf-2: var(--leaf-2);
+  --color-leaf-3: var(--leaf-3);
+  --color-leaf-4: var(--leaf-4);
+  --color-leaf-5: var(--leaf-5);
+  --color-forest: var(--forest);
+
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+
+  /* Short names used across the app's own components. */
+  --color-canvas: var(--background);
+  --color-surface: var(--card);
+  --color-subtle: var(--muted);
+  --color-line: var(--border);
+  --color-ink: var(--foreground);
+  --color-mute: var(--muted-foreground);
+  --color-brand: var(--leaf-4);
+  --color-brand-deep: var(--leaf-5);
+  --color-brand-soft: #eaf3e5;
+
+  /* Skeleton on the video (must stand out on grass and sky). Not named "left"/"right": Tailwind would
      then also read the alignment classes text-left / text-right as these colours. */
   --color-skeleton-left: #4aa3df;
   --color-skeleton-right: #f0b93a;
 
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
-  --shadow-card: 0 1px 2px rgb(22 32 26 / 0.04), 0 4px 16px rgb(22 32 26 / 0.06);
+  --font-sans: "Aspekta", "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Aspekta", "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --font-aspekta: "Aspekta", "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-card: 0 2px 8px rgb(2 6 23 / 0.06);
 }
 
-html {
-  background: var(--color-canvas);
-}
-
-body {
-  margin: 0;
-  background: var(--color-canvas);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 1.55;
-  -webkit-font-smoothing: antialiased;
-}
-
-h1,
-h2,
-h3 {
-  font-family: var(--font-display);
-  font-weight: 650;
-  letter-spacing: -0.015em;
-  line-height: 1.2;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    background: var(--background);
+  }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+  }
 }
 
 .tnum {
   font-variant-numeric: tabular-nums;
 }
 
-:focus-visible {
-  outline: 2px solid var(--color-brand);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
-
-/* ---- shared building blocks ---------------------------------------------------------------- */
-
-.card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: 16px;
-  box-shadow: var(--shadow-card);
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  border-radius: 10px;
-  padding: 0.6rem 1.1rem;
-  font-weight: 600;
-  font-size: 0.95rem;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
-  cursor: pointer;
-}
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.btn-primary {
-  background: var(--color-brand);
-  color: white;
-}
-.btn-primary:not(:disabled):hover {
-  background: var(--color-brand-deep);
-}
-.btn-secondary {
-  background: var(--color-surface);
-  color: var(--color-ink);
-  border: 1px solid var(--color-line);
-}
-.btn-secondary:not(:disabled):hover {
-  border-color: var(--color-mute);
-}
-.btn-quiet {
-  color: var(--color-mute);
-  padding: 0.4rem 0.6rem;
-  font-weight: 500;
-}
-.btn-quiet:hover {
-  color: var(--color-ink);
-  background: var(--color-subtle);
-}
-
 .link {
-  color: var(--color-brand);
+  color: var(--leaf-5);
   font-weight: 500;
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: color-mix(in srgb, var(--color-brand) 35%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--leaf-5) 35%, transparent);
 }
 .link:hover {
-  text-decoration-color: var(--color-brand);
+  text-decoration-color: var(--leaf-5);
 }
 
-/* Segmented control: a row of options where one is selected */
-.seg {
-  display: inline-flex;
-  padding: 3px;
-  gap: 2px;
-  background: var(--color-subtle);
-  border-radius: 10px;
+/* Diagonal stripes over a fill (bars, the stacked club-tracking bars). */
+.hatch {
+  background-image: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.32) 0 1.5px, transparent 1.5px 6px);
 }
-.seg > button,
-.seg > label {
-  border-radius: 8px;
-  padding: 0.3rem 0.7rem;
-  font-size: 0.875rem;
-  color: var(--color-mute);
-  cursor: pointer;
+
+/* Homepage metrics bento (components/home/MetricsBento.tsx): named areas, two columns on small screens. */
+.bento {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "gauge gauge"
+    "spine head"
+    "knee knee"
+    "curve curve"
+    "green green"
+    "club club"
+    "weight weight";
+  grid-template-rows: 300px 150px 150px 330px 300px 320px 150px;
 }
-.seg > [aria-pressed="true"],
-.seg > label:has(input:checked) {
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgb(22 32 26 / 0.12);
+@media (min-width: 768px) {
+  .bento {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "gauge spine head"
+      "gauge knee curve"
+      "green club curve"
+      "green club weight";
+    grid-template-rows: 160px 160px 175px 160px;
+  }
+}
+
+/* Dashboard charts: a line draws itself in (pathLength="1"), its fill and markers fade in after it. */
+.chart-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: chart-draw 1100ms cubic-bezier(0.22, 0.8, 0.24, 1) 150ms forwards;
+}
+.chart-after {
+  animation: chart-fade 600ms ease 900ms both;
+}
+@keyframes chart-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes chart-fade {
+  from {
+    opacity: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
     animation: none !important;
+  }
+  .chart-draw {
+    stroke-dashoffset: 0;
   }
 }

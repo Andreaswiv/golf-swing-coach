@@ -1,6 +1,8 @@
-import type { MomentName, Rating, SwingAnalysis, SwingMeasurement } from "../api";
-import { MOMENT_LABEL, RATING, formatMeasurement, measurementInfo } from "../swingLabels";
-import { ChevronRight } from "./icons";
+import { ChevronDown } from "lucide-react";
+import type { MomentName, Rating, SwingAnalysis, SwingMeasurement } from "@/api";
+import { Card } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { MOMENT_LABEL, RATING, formatMeasurement, measurementInfo } from "@/swingLabels";
 import InfoTip from "./InfoTip";
 
 /** Below this the value is shown with a "Low confidence" note (same limit as the feedback). */
@@ -31,15 +33,16 @@ export default function SwingResults({ swing, onSeek }: Props) {
     .filter((c) => c.n > 0);
 
   return (
-    <details className="card group" open={swing.feedback ? undefined : true}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 [&::-webkit-details-marker]:hidden">
+    <Collapsible asChild defaultOpen={!swing.feedback}>
+      <Card className="group gap-0 py-0">
+      <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl p-6 text-left">
         <span>
           <h2 id="swing-h" className="text-base">
             Measurements
           </h2>
-          <span className="text-sm text-mute">The numbers behind the feedback</span>
+          <span className="text-sm text-muted-foreground">The numbers behind the feedback</span>
           {counts.length > 0 && (
-            <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-mute">
+            <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {counts.map(({ r, n }) => (
                 <span key={r} className="flex items-center gap-1.5">
                   <span className={`h-2 w-2 rounded-full ${RATING[r].dot}`} />
@@ -49,11 +52,11 @@ export default function SwingResults({ swing, onSeek }: Props) {
             </span>
           )}
         </span>
-        <ChevronRight className="h-5 w-5 text-mute transition-transform group-open:rotate-90" />
-      </summary>
+        <ChevronDown className="size-5 text-muted-foregroundd-foreground transition-transform group-data-[state=open]:rotate-180" />
+      </CollapsibleTrigger>
 
-      <div className="space-y-5 border-t border-line p-5">
-        <p className="text-sm text-mute">
+      <CollapsibleContent className="space-y-5 border-t p-6">
+        <p className="text-sm text-muted-foreground">
           Measured in 2D from the camera's point of view, so these are not true 3D joint angles. Distances are a
           share of your torso length, so camera distance does not matter.
           {swing.mirrored_for_left_handed && " Left-handed swings are mirrored, so “lead” means your right side."}{" "}
@@ -63,7 +66,7 @@ export default function SwingResults({ swing, onSeek }: Props) {
         </p>
 
         {swing.notes.length > 0 && (
-          <ul className="space-y-2 rounded-xl bg-subtle p-4 text-sm">
+          <ul className="space-y-2 rounded-lg bg-muted p-4 text-sm">
             {swing.notes.map((n) => (
               <li key={n.code}>{n.message}</li>
             ))}
@@ -80,33 +83,33 @@ export default function SwingResults({ swing, onSeek }: Props) {
 
         {orderedGroups(groups).map((g) => (
           <div key={g}>
-            <h3 className="text-sm font-semibold text-mute">{g === "timing" ? "Timing" : (MOMENT_LABEL[g as MomentName] ?? g)}</h3>
-            <ul className="mt-2 divide-y divide-line rounded-xl border border-line">
+            <h3 className="text-sm font-semibold text-muted-foreground">{g === "timing" ? "Timing" : (MOMENT_LABEL[g as MomentName] ?? g)}</h3>
+            <ul className="mt-2 divide-y rounded-lg border">
               {groups.get(g)!.map((m) => {
                 const info = measurementInfo(m.name);
                 const rating = m.rating ? RATING[m.rating] : null;
                 // Older results have no rating: keep the old look (grey only when uncertain).
-                const valueCls = rating ? rating.value : m.rating === undefined && m.confidence >= 0.5 ? "" : "text-mute";
+                const valueCls = rating ? rating.value : m.rating === undefined && m.confidence >= 0.5 ? "" : "text-muted-foreground";
                 // The whole row seeks the video: a button stretched under the content, so the (i)
                 // can be a button of its own (a button inside a button is not allowed).
                 return (
                   <li
                     key={m.name}
-                    className="relative grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 px-4 py-3 first:rounded-t-xl last:rounded-b-xl"
+                    className="relative grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 px-4 py-3 first:rounded-t-lg last:rounded-b-lg"
                   >
                     <button
                       onClick={() => onSeek(m.frame_index)}
                       aria-label={`${info.label}: ${formatMeasurement(m)}. Show this moment in the video.`}
-                      className="absolute inset-0 rounded-[inherit] transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand"
+                      className="absolute inset-0 rounded-[inherit] transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                     />
                       <span className="pointer-events-none relative font-medium">{info.label}</span>
                       <span className={`tnum pointer-events-none relative text-right text-lg font-semibold leading-tight ${valueCls}`}>
                         {formatMeasurement(m)}
                       </span>
-                      <span className="pointer-events-none relative text-sm text-mute">
+                      <span className="pointer-events-none relative text-sm text-muted-foreground">
                         {info.meaning}
                         {m.typical && (
-                          <span className="mt-0.5 block text-ink/80">Good swings: {m.typical}</span>
+                          <span className="mt-0.5 block text-foreground/80">Good swings: {m.typical}</span>
                         )}
                       </span>
                       <span className="pointer-events-none relative flex flex-col items-end gap-1 text-right text-xs">
@@ -116,7 +119,7 @@ export default function SwingResults({ swing, onSeek }: Props) {
                         {m.confidence < LOW_CONFIDENCE && (
                           <span className="pointer-events-auto">
                             <InfoTip label="Low confidence" question="What does low confidence mean?">
-                              <span className="mb-0.5 block font-semibold text-ink">What does low confidence mean?</span>
+                              <span className="mb-0.5 block font-semibold text-foreground">What does low confidence mean?</span>
                               The analysis could not see this part of your swing clearly (hidden joint, blur or poor
                               light), so treat the number as a rough guide.
                             </InfoTip>
@@ -129,7 +132,8 @@ export default function SwingResults({ swing, onSeek }: Props) {
             </ul>
           </div>
         ))}
-      </div>
-    </details>
+      </CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }

@@ -227,8 +227,9 @@ def detect_phases(s: Series) -> Phases:
                 "code": "slow_motion_suspected",
                 "message": (
                     f"The downswing takes {downswing_s:.2f} s of video time, but real downswings take about "
-                    "0.25 to 0.45 s. The clip was probably filmed in slow motion. Phone slow motion often changes "
-                    "speed within the clip, so all timing values (durations and tempo ratio) are left out."
+                    "0.25 to 0.45 s. The clip was probably filmed in slow motion, so the durations in seconds are "
+                    "left out. The tempo ratio is still measured: it stays the same when the whole swing is slowed "
+                    "evenly."
                 ),
             }
         )

@@ -1,11 +1,15 @@
-import type { SwingFeedback, SwingFinding } from "../api";
-import { TONE_CLASS, isClubFinding, verdict } from "../swingLabels";
-import { CheckIcon, EyeIcon, InfoIcon, TargetIcon } from "./icons";
+import { Check, Eye, Info, Target, type LucideIcon } from "lucide-react";
+import type { SwingFeedback, SwingFinding } from "@/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import { TONE_CLASS, isClubFinding, verdict } from "@/swingLabels";
 
-const KIND: Record<SwingFinding["kind"], { label: string; badge: string; icon: typeof CheckIcon; iconCls: string }> = {
-  improve: { label: "Work on this", badge: "bg-bad-soft text-bad", icon: TargetIcon, iconCls: "bg-bad-soft text-bad" },
-  watch: { label: "Worth checking", badge: "bg-warn-soft text-warn", icon: EyeIcon, iconCls: "bg-warn-soft text-warn" },
-  strength: { label: "Strength", badge: "bg-good-soft text-good", icon: CheckIcon, iconCls: "bg-good-soft text-good" },
+const KIND: Record<SwingFinding["kind"], { label: string; badge: string; icon: LucideIcon; iconCls: string }> = {
+  improve: { label: "Work on this", badge: "bg-bad-soft text-bad", icon: Target, iconCls: "bg-bad-soft text-bad" },
+  watch: { label: "Worth checking", badge: "bg-warn-soft text-warn", icon: Eye, iconCls: "bg-warn-soft text-warn" },
+  strength: { label: "Strength", badge: "bg-good-soft text-good", icon: Check, iconCls: "bg-good-soft text-good" },
 };
 
 function reliability(c: number): string {
@@ -26,14 +30,14 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
 
   return (
     <section aria-labelledby="feedback-h" className="space-y-4">
-      <div className="card p-5 sm:p-6">
-        <p className={`inline-block rounded-full px-3 py-1 text-sm font-semibold ${TONE_CLASS[v.tone]}`}>{v.title}</p>
+      <Card className="gap-0 p-6">
+        <Badge className={cn("h-7 w-fit rounded-md px-2.5 text-sm", TONE_CLASS[v.tone])}>{v.title}</Badge>
         <h2 id="feedback-h" className="sr-only">
           Feedback
         </h2>
-        <p className="mt-3 text-lg leading-relaxed">{feedback.summary}</p>
+        <p className="mt-3 text-[17px] leading-relaxed">{feedback.summary}</p>
         {counts.length > 0 && (
-          <p className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-mute">
+          <p className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
             {counts.map(({ k, n }) => (
               <span key={k} className="flex items-center gap-1.5">
                 <span className={`h-2 w-2 rounded-full ${k === "strength" ? "bg-good" : k === "improve" ? "bg-bad" : "bg-warn"}`} />
@@ -42,24 +46,25 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
             ))}
           </p>
         )}
-      </div>
+      </Card>
 
       {feedback.findings.map((f) => {
         const kind = KIND[f.kind];
         const Icon = kind.icon;
         return (
-          <article key={f.code} className="card p-5 sm:p-6">
+          <article key={f.code}>
+            <Card className="gap-0 p-6">
             <div className="flex gap-4">
-              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${kind.iconCls}`}>
-                <Icon />
+              <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-full", kind.iconCls)}>
+                <Icon className="size-5" />
               </span>
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap gap-1.5">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${kind.badge}`}>{kind.label}</span>
+                  <Badge className={cn("rounded-md", kind.badge)}>{kind.label}</Badge>
                   {isClubFinding(f) && (
-                    <span className="rounded-full bg-subtle px-2 py-0.5 text-xs font-semibold text-mute">
+                    <Badge variant="secondary" className="rounded-md text-muted-foreground">
                       From club tracking
-                    </span>
+                    </Badge>
                   )}
                 </p>
                 <h3 className="mt-1.5 text-lg">{f.title}</h3>
@@ -69,13 +74,13 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
                   <div className="mt-4 space-y-3">
                     {f.why && (
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-mute">Why it matters</p>
+                        <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Why it matters</p>
                         <p className="mt-1 text-[0.95rem] leading-relaxed">{f.why}</p>
                       </div>
                     )}
                     {f.drill && (
-                      <div className="rounded-xl bg-brand-soft p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-brand">Try this drill</p>
+                      <div className="rounded-lg border border-leaf-1 bg-brand-soft p-4">
+                        <p className="text-xs font-semibold tracking-wide text-leaf-5 uppercase">Try this drill</p>
                         <p className="mt-1 text-[0.95rem] leading-relaxed">{f.drill}</p>
                       </div>
                     )}
@@ -84,26 +89,27 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
 
                 <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
                   {f.frame_index !== null && (
-                    <button onClick={() => onSeek(f.frame_index!)} className="btn btn-secondary px-3 py-1.5 text-sm">
-                      <EyeIcon className="h-4 w-4" />
+                    <Button variant="outline" size="sm" onClick={() => onSeek(f.frame_index!)}>
+                      <Eye />
                       Show in video
-                    </button>
+                    </Button>
                   )}
-                  <span className="text-xs text-mute">{reliability(f.confidence)}</span>
+                  <span className="text-xs text-muted-foreground">{reliability(f.confidence)}</span>
                 </div>
               </div>
             </div>
+            </Card>
           </article>
         );
       })}
 
       {feedback.not_checked.length > 0 && (
-        <div className="rounded-2xl border border-dashed border-line p-5">
+        <div className="rounded-xl border border-dashed p-6">
           <h3 className="flex items-center gap-2 text-base">
-            <InfoIcon className="h-5 w-5 text-mute" />
+            <Info className="size-5 text-muted-foreground" />
             Not judged from this video
           </h3>
-          <ul className="mt-2 space-y-1.5 pl-7 text-sm text-mute">
+          <ul className="mt-2 space-y-1.5 pl-7 text-sm text-muted-foreground">
             {feedback.not_checked.map((x) => (
               <li key={x} className="list-disc">
                 {x}
@@ -113,7 +119,7 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
         </div>
       )}
 
-      <p className="px-1 text-xs text-mute">
+      <p className="px-1 text-xs text-muted-foreground">
         Automatic feedback from 2D video and one camera angle. Use it as a guide for what to look at, not as a
         diagnosis.
       </p>

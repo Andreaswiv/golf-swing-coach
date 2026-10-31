@@ -1,4 +1,5 @@
-import type { SwingAnalysis } from "../api";
+import type { SwingAnalysis } from "@/api";
+import { Card } from "@/components/ui/card";
 
 function pct(v: number | undefined): string {
   return v === undefined ? "–" : `${Math.round(v * 100)}%`;
@@ -10,14 +11,14 @@ export default function ClubTrackingView({ swing }: { swing: SwingAnalysis }) {
 
   if (!club?.tracked) {
     return (
-      <div className="card p-5">
+      <Card className="gap-0 p-6">
         <h2 className="text-base">Club tracking</h2>
-        <p className="mt-1 text-sm text-mute">
+        <p className="mt-1 text-sm text-muted-foreground">
           The club was not tracked in this swing, so there is no club feedback or swing plane. Swings uploaded
           before club tracking was added have to be uploaded again: “Re-analyse” reuses the saved joint positions
           and does not look at the video.
         </p>
-      </div>
+      </Card>
     );
   }
 
@@ -28,9 +29,9 @@ export default function ClubTrackingView({ swing }: { swing: SwingAnalysis }) {
     ["Club head", share?.head],
   ];
   return (
-    <div className="card p-5">
+    <Card className="gap-0 p-6">
       <h2 className="text-base">Club tracking</h2>
-      <p className="mt-1 text-sm text-mute">
+      <p className="mt-1 text-sm text-muted-foreground">
         Share of the checked frames where each part of the club was found.
         {club.frames_checked !== undefined &&
           club.frames_total !== undefined &&
@@ -41,13 +42,13 @@ export default function ClubTrackingView({ swing }: { swing: SwingAnalysis }) {
       </p>
       <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
         {parts.map(([label, v]) => (
-          <div key={label} className="rounded-xl bg-subtle px-2 py-2.5">
-            <dt className="text-xs text-mute">{label}</dt>
+          <div key={label} className="rounded-lg bg-muted px-2 py-3">
+            <dt className="text-xs text-muted-foreground">{label}</dt>
             <dd className={`tnum text-lg font-semibold ${v !== undefined && v < 0.5 ? "text-warn" : ""}`}>{pct(v)}</dd>
           </div>
         ))}
       </dl>
-      <p className="mt-3 text-xs text-mute">
+      <p className="mt-3 text-xs text-muted-foreground">
         The club head blurs in the fast part of the swing, so it is found less often than the shaft. Where it is
         missing, its position is taken from the end of the shaft (drawn dashed on the video).
         {swing.camera_angle === "down_the_line"
@@ -56,6 +57,6 @@ export default function ClubTrackingView({ swing }: { swing: SwingAnalysis }) {
             : " No swing plane: the club was not found clearly enough at address."
           : " The swing plane is only drawn for down-the-line videos."}
       </p>
-    </div>
+    </Card>
   );
 }

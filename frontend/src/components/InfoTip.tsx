@@ -1,11 +1,15 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { InfoIcon } from "./icons";
+import { Info } from "lucide-react";
 
 interface Props {
   /** Visible text next to the (i). */
   label: string;
   /** What the explanation is about, for screen readers: "What does low confidence mean?" */
   question: string;
+  /** Show only the (i); `label` is still read out. */
+  iconOnly?: boolean;
+  /** Which way the pop-up extends from the (i): "end" (leftward) or "start" (rightward). */
+  align?: "start" | "end";
   children: ReactNode;
 }
 
@@ -13,7 +17,7 @@ interface Props {
  * A label with an (i) that explains it. Opens on hover, on keyboard focus and on tap (touch
  * screens have no hover); closes on Escape, on tapping elsewhere or when focus leaves.
  */
-export default function InfoTip({ label, question, children }: Props) {
+export default function InfoTip({ label, question, iconOnly = false, align = "end", children }: Props) {
   const id = useId();
   const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -53,16 +57,16 @@ export default function InfoTip({ label, question, children }: Props) {
             setHovered(false);
           }
         }}
-        className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-mute transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-brand"
+        className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
       >
-        {label}
-        <InfoIcon className="h-3.5 w-3.5" />
+        {!iconOnly && label}
+        <Info className="size-3.5" />
       </button>
       {open && (
         <span
           id={id}
           role="tooltip"
-          className="absolute bottom-full right-0 z-20 mb-1.5 w-60 rounded-xl border border-line bg-surface px-3 py-2.5 text-left text-xs font-normal leading-snug text-ink shadow-lg"
+          className={`absolute bottom-full ${align === "start" ? "left-0" : "right-0"} z-20 mb-1.5 w-60 rounded-lg border bg-popover px-3 py-2.5 text-left text-xs font-normal leading-snug text-popover-foreground shadow-lg`}
         >
           {children}
         </span>

@@ -10,7 +10,7 @@ import logging
 
 from .club import build_club_series, measure_club
 from .feedback import build_feedback
-from .measurements import measure
+from .measurements import measure, timing_problem
 from .phases import PHASE_ORDER, NoSwingFound, detect_phases
 from .ratings import rate_measurements
 from .series import POLYORDER, build_series, rejected_landmarks
@@ -65,6 +65,17 @@ def analyse_swing(payload: dict) -> dict:
                 }
             )
     result["notes"].extend(phases.notes)
+    if timing_problem(series, phases) == "speed_change":
+        result["notes"].append(
+            {
+                "code": "speed_change_suspected",
+                "message": (
+                    "The backswing and downswing do not fit together as one continuous speed: the clip "
+                    "probably speeds up or slows down during the swing (common in phone slow motion), so "
+                    "the tempo is left out. Trim the clip to the slow part, or film at normal speed."
+                ),
+            }
+        )
     try:
         angle = payload.get("camera_angle", "")
         result["measurements"] = [m.to_dict() for m in measure(series, phases, angle)]
