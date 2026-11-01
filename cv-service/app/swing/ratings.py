@@ -125,7 +125,8 @@ def _rules(toes: float | None) -> dict[str, tuple[Rule, str]]:
         # Real-time durations (left out for slow motion). The backswing starts when the HANDS move,
         # a little after the club head, so it reads shorter than a club-based timing.
         "backswing_duration": (_range(0.55, 1.2, 0.13, 0.3), "0.55 to 1.2 s"),
-        "downswing_duration": (_range(0.22, 0.45, 0.04, 0.15), "0.22 to 0.45 s"),
+        # Pros take about 0.25 s, 10-25 handicaps about 0.4 s (Grober 2010).
+        "downswing_duration": (_range(0.22, 0.35, 0.04, 0.1), "0.22 to 0.35 s"),
         # Face-on. Shoulder tilt: positive = lead shoulder higher (2D, from horizontal).
         "shoulder_tilt_address": (
             _range(3, 18, 5, 7),
@@ -135,7 +136,8 @@ def _rules(toes: float | None) -> dict[str, tuple[Rule, str]]:
             _range(-55, -10, 10, 10),
             f"lead shoulder 10{deg} to 55{deg} lower (the shoulders turn on a tilt, not flat)",
         ),
-        "shoulder_tilt_impact": (_range(10, 40, 5, 10), f"lead shoulder 10{deg} to 40{deg} higher"),
+        # Tour average 39°, high handicaps 27.5° (GOLFTEC SwingTRU).
+        "shoulder_tilt_impact": (_range(10, 45, 5, 10), f"lead shoulder 10{deg} to 45{deg} higher"),
         "head_shift_impact": (
             _range(-15, 5, 10, 7),
             "from 15% behind to 5% ahead of its address position (the head stays behind the ball)",

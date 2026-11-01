@@ -4,12 +4,11 @@ Every sentence is generated from a measurement with a fixed template, so the
 feedback can never claim something the numbers do not show.
 
 Thresholds are set so that what good players normally do is NOT a fault.
-3D studies of tour players show, from address to impact, roughly 5-12 degrees
-less forward bend, the pelvis moving a few centimetres toward the ball and the
-head lowering about 5-10 cm. A faulty swing goes clearly beyond that. The
-limits were sanity-checked against a tour player's swing (tests/fixtures),
-which must come out without "improve" findings. They are listed at the top so
-they are easy to review and tune.
+Where a published source gives numbers (address posture, tempo, durations,
+face-on hip shift and shoulder tilt), the limits follow it; the rest are
+calibrated so a tour player's swing (tests/fixtures) comes out without
+"improve" findings. docs/RATING_SOURCES.md lists the source and evidence level
+for every limit. They are listed at the top so they are easy to review and tune.
 
 Each finding gets a kind:
   * "strength": within the typical range, and the data is reliable (confidence >= 0.5).
@@ -26,8 +25,9 @@ RELIABLE = 0.5
 AVERAGE_TORSO_CM = 50  # shoulder-centre to hip-centre for an average adult; only used to make % readable
 
 # Typical ranges (2D, degrees or % of torso length). (mild, clear) limits.
-SPINE_ADDRESS_RANGE = (28.0, 48.0)
-KNEE_FLEX_RANGE = (12.0, 38.0)
+# Sources per limit: docs/RATING_SOURCES.md.
+SPINE_ADDRESS_RANGE = (28.0, 48.0)  # pros 41.5 ± 2.9 (5-iron, Kim et al. 2018); tour ~29 with driver (GOLFTEC)
+KNEE_FLEX_RANGE = (12.0, 38.0)  # pros' trail knee 24.4 ± 5.5 (Kim et al. 2018): about mean ± 2 SD
 SPINE_LOSS = (12.0, 18.0)  # degrees more upright at impact than at address
 REAR_HIP_TOWARD_BALL = (15.0, 25.0)  # % torso (15% ~ 7.5 cm)
 HEAD_DROP = (20.0, 30.0)  # % torso lower than address (20% ~ 10 cm)
@@ -35,7 +35,7 @@ HEAD_LIFT = (8.0, 15.0)  # % torso higher than address
 SWAY = (8.0, 15.0)  # % torso away from the target at the top
 LEAD_ARM_BEND = (20.0, 35.0)  # degrees of bend at the top
 STANCE_RANGE = (0.85, 1.6)  # ankle distance / shoulder width
-TEMPO_RANGE = (2.3, 4.0)  # backswing : downswing
+TEMPO_RANGE = (2.3, 4.0)  # backswing : downswing; pros 2.4-3.4, 10-25 handicaps 1.9-2.1 (Grober 2010)
 # Club (down-the-line). Shaft pointing beyond the ball halfway down (% torso; 40% ~ 20 cm).
 SHAFT_OUTSIDE = (40.0, 80.0)
 # Praise only up to here (% torso beyond the ball). Good downswings point between the toes and the
