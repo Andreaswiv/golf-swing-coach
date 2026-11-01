@@ -25,7 +25,7 @@ if [ "$OS" = "Darwin" ]; then
     if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
       fail "This shell runs under Rosetta (x86_64 emulation). Open a native arm64 terminal; emulated builds are much slower."
     else
-      warn "Intel Mac detected; the project works but was targeted at Apple Silicon."
+      ok "Intel Mac (x86_64)"
     fi
   fi
   MEM_GB=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
@@ -55,7 +55,7 @@ if have docker; then
   fi
   if docker compose version >/dev/null 2>&1; then ok "docker compose $(docker compose version --short 2>/dev/null)"; else fail "Docker Compose v2 plugin not found"; fi
 else
-  fail "docker not found. Install Docker Desktop for Mac (Apple Silicon)."
+  fail "docker not found. Install Docker Desktop (macOS, Windows) or Docker Engine with the Compose plugin (Linux)."
 fi
 
 echo "Tools for running services outside Docker (optional)"
