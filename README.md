@@ -214,9 +214,4 @@ your source code.
 - **Fonts:** Aspekta (SIL Open Font License) is self-hosted in `frontend/public/fonts`. Plus
   Jakarta Sans and JetBrains Mono come from Fontsource. No fonts are loaded from Google, so
   visitors' IP addresses are not sent there.
-- **Swing data:** `cv-service/tests/fixtures` holds keypoints (joint coordinates only, no video)
-  extracted from a publicly posted video of a professional's swing. It is used to check that a
-  good swing gets no fault findings. Replace it with a swing you have the rights to before
-  publishing the repository (see [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md)). The example
-  numbers on the homepage are rounded and do not name any player. Do not use a real player's name
-  or likeness to promote the app without their permission.
+- **Homepage example:** the example numbers on the homepage are rounded and do not name any player.

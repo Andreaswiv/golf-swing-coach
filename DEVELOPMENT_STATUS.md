@@ -107,10 +107,6 @@ The current setup assumes one trusted user on their own computer. Before putting
    delete button covers a single swing), and hosting in the EU/EEA.
 7. **AGPL:** the project is licensed AGPL-3.0 (`LICENSE`), matching the club model. Users of the
    hosted app must be able to get the source code; a public repository satisfies this.
-8. **Test fixture:** replace `cv-service/tests/fixtures/tour_swing_dtl_slowmo_club.json` (keypoints
-   from a publicly posted video of a professional) with a swing you have the rights to, then
-   re-check the regression test's expected frames. Do not keep downloaded third-party videos in
-   `data/`.
 
 ## History
 
