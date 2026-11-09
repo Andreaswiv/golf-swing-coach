@@ -39,24 +39,24 @@ def _decoder() -> OnnxClubDetector:
 
 def test_decode_undoes_the_letterbox_and_keeps_the_best_box_per_part():
     det = _decoder()
-    # A 1280x720 portrait frame: scale 0.5, letterboxed with 140 px grey bars left and right.
+    # A 1280x720 portrait frame: scale 0.5, 360 px wide, padded to 384 (12 px grey left and right).
     blob, scale, left, top = det.preprocess(np.zeros((1280, 720, 3), np.uint8))
-    assert blob.shape == (1, 3, 640, 640)
-    assert (scale, left, top) == (0.5, 140, 0)
+    assert blob.shape == (1, 3, 640, 384)
+    assert (scale, left, top) == (0.5, 12, 0)
 
     out = np.zeros((1, 7, 3), np.float32)
-    out[0, :4, 0] = (320, 320, 100, 200)  # shaft, weak
-    out[0, :4, 1] = (320, 320, 40, 40)  # shaft, best
+    out[0, :4, 0] = (192, 320, 100, 200)  # shaft, weak
+    out[0, :4, 1] = (192, 320, 40, 40)  # shaft, best
     out[0, 4, :2] = (0.5, 0.9)
     out[0, 5, 2] = 0.2  # head below the confidence threshold
     out[0, 6, 2] = 0.7  # hands
-    out[0, :4, 2] = (140, 100, 40, 20)  # half in the left grey bar
+    out[0, :4, 2] = (12, 100, 40, 20)  # half in the left grey bar
     found = det.decode(out, scale, left, top, 720, 1280)
 
     assert set(found) == {"shaft", "hands"}
     shaft = found["shaft"]
     assert shaft.conf == np.float32(0.9)
-    # Centre (320, 320) in input pixels -> (360, 640) in the frame -> (0.5, 0.5).
+    # Centre (192, 320) in input pixels -> (360, 640) in the frame -> (0.5, 0.5).
     assert np.allclose([shaft.x1, shaft.y1, shaft.x2, shaft.y2], [0.4444, 0.4688, 0.5556, 0.5312], atol=1e-3)
     # Boxes reaching into the grey bars are clipped to the frame.
     assert found["hands"].x1 == 0.0

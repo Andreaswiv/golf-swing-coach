@@ -29,11 +29,7 @@ builder.Services.AddDbContext<AppDbContext>(o =>
 
 builder.Services.AddSingleton<StoragePaths>();
 builder.Services.AddSingleton<IAnalysisQueue, AnalysisQueue>();
-builder.Services.AddHttpClient<ICvServiceClient, CvServiceClient>((sp, http) =>
-{
-    http.BaseAddress = new Uri(sp.GetRequiredService<IOptions<CvServiceOptions>>().Value.BaseUrl);
-    http.Timeout = TimeSpan.FromSeconds(30);
-});
+builder.Services.AddHttpClient<ICvServiceClient, CvServiceClient>(http => http.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHostedService<AnalysisWorker>();
 
 var app = builder.Build();

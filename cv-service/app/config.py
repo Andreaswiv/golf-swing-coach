@@ -22,8 +22,10 @@ class Settings:
     num_poses: int
     # Club detection (shaft, head, hands): ONNX model built into the image. Optional:
     # without it the analysis runs as before and says the club was not tracked.
-    club_model_path: Path = Path("/app/models/club_swingtrace_yolo11m.onnx")
+    club_model_path: Path = Path("/app/models/club_swingtrace_yolo11m_quant.onnx")
     club_detection: bool = True
+    # Inference threads for the club model; 0 = let ONNX Runtime decide.
+    club_threads: int = 0
 
     @staticmethod
     def from_env() -> "Settings":
@@ -34,8 +36,9 @@ class Settings:
             ),
             max_process_dim=int(os.environ.get("MAX_PROCESS_DIM", "1280")),
             num_poses=int(os.environ.get("NUM_POSES", "2")),
-            club_model_path=Path(os.environ.get("CLUB_MODEL_PATH", "/app/models/club_swingtrace_yolo11m.onnx")),
+            club_model_path=Path(os.environ.get("CLUB_MODEL_PATH", "/app/models/club_swingtrace_yolo11m_quant.onnx")),
             club_detection=os.environ.get("CLUB_DETECTION", "1").lower() not in ("0", "false", "no", "off"),
+            club_threads=int(os.environ.get("CLUB_THREADS", "0")),
         )
 
     def resolve_data_path(self, relative: str) -> Path:

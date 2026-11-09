@@ -49,8 +49,12 @@ services:
     environment:
       ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB:-golfcoach};Username=${POSTGRES_USER:-golfcoach};Password=${POSTGRES_PASSWORD:-golfcoach_dev}
       CvService__BaseUrl: http://cv-service:8000
+      # Used first when it answers (scripts/native_cv.py); otherwise the cv-service container above.
+      CvService__NativeUrl: ${CV_NATIVE_URL-http://host.docker.internal:8001}
       Storage__DataDir: /data
       Upload__MaxMegabytes: ${UPLOAD_MAX_MB:-500}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Docker Desktop has this name already; Linux needs it
     volumes:
       - ./data:/data
     ports:

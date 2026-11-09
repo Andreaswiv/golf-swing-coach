@@ -8,8 +8,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Video> Videos => Set<Video>();
     public DbSet<Analysis> Analyses => Set<Analysis>();
     public DbSet<KeypointSet> KeypointSets => Set<KeypointSet>();
-    public DbSet<Phase> Phases => Set<Phase>();
-    public DbSet<Measurement> Measurements => Set<Measurement>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -51,27 +49,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.AnalysisId).IsUnique();
             e.Property(x => x.FilePath).HasMaxLength(400);
             e.Property(x => x.DataFormat).HasMaxLength(60);
-        });
-
-        b.Entity<Phase>(e =>
-        {
-            e.HasOne(x => x.Analysis).WithMany(a => a.Phases).HasForeignKey(x => x.AnalysisId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.Property(x => x.Name).HasMaxLength(40);
-            e.Property(x => x.DetectionMethod).HasMaxLength(60);
-            e.HasIndex(x => x.AnalysisId);
-        });
-
-        b.Entity<Measurement>(e =>
-        {
-            e.HasOne(x => x.Analysis).WithMany(a => a.Measurements).HasForeignKey(x => x.AnalysisId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.Property(x => x.Name).HasMaxLength(80);
-            e.Property(x => x.Phase).HasMaxLength(40);
-            e.Property(x => x.Unit).HasMaxLength(20);
-            e.Property(x => x.CameraAngle).HasConversion<string>().HasMaxLength(20);
-            e.Property(x => x.Type).HasConversion<string>().HasMaxLength(20);
-            e.HasIndex(x => x.AnalysisId);
         });
     }
 }

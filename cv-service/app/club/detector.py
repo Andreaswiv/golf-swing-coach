@@ -1,9 +1,9 @@
 """Golf club detection (shaft, club head, hands) with an ONNX model.
 
 The model is SwingTrace's YOLO11m (https://github.com/nishsm/golf-club-detection-swingtrace,
-AGPL-3.0, trained on the CC BY 4.0 "golf-club-tracking" dataset), converted to ONNX when
-the Docker image is built (see the Dockerfile), so the service needs ONNX Runtime but not
-PyTorch.
+AGPL-3.0, trained on the CC BY 4.0 "golf-club-tracking" dataset), converted to ONNX and
+quantized to 8 bits when the Docker image is built (see the Dockerfile), so the service
+needs ONNX Runtime but not PyTorch.
 
 YOLO11 ONNX output: (1, 4 + classes, anchors) with box centre x, y, width, height in
 input pixels, then one score per class. The analysis only needs the single most likely
@@ -20,6 +20,8 @@ import numpy as np
 
 # Model class index -> part. The source dataset labels them "0", "1" and "3".
 PARTS = ("shaft", "head", "hands")
+# YOLO input sides must be multiples of this.
+STRIDE = 32
 
 
 @dataclass
@@ -69,13 +71,18 @@ class OnnxClubDetector(ClubDetector):
         self.name = f"swingtrace-yolo11m-onnx:{model_path.stem}"
 
     def preprocess(self, frame_bgr: np.ndarray) -> tuple[np.ndarray, float, float, float]:
-        """Letterbox to a square input like Ultralytics does (grey padding, aspect ratio kept)."""
+        """Scale the longest side to ``size``, then pad with grey only up to a multiple of STRIDE.
+
+        The input follows the frame's shape instead of a square: a portrait video keeps the same
+        detail, and the model no longer spends 40% of its time on grey bars.
+        """
         h, w = frame_bgr.shape[:2]
-        scale = min(self.size / h, self.size / w)
+        scale = self.size / max(h, w)
         nh, nw = int(round(h * scale)), int(round(w * scale))
+        height, width = -(-nh // STRIDE) * STRIDE, -(-nw // STRIDE) * STRIDE
         resized = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
-        top, left = (self.size - nh) // 2, (self.size - nw) // 2
-        canvas = np.full((self.size, self.size, 3), 114, dtype=np.uint8)
+        top, left = (height - nh) // 2, (width - nw) // 2
+        canvas = np.full((height, width, 3), 114, dtype=np.uint8)
         canvas[top : top + nh, left : left + nw] = resized
         blob = canvas[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0
         return np.ascontiguousarray(blob), scale, left, top

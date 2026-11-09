@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from .limits import (
+    AVERAGE_TORSO_CM,
     HAND_PATH_INSIDE,
     HAND_PATH_OUTSIDE,
     HEAD_DROP,
@@ -39,8 +40,6 @@ from .limits import (
     TEMPO_RANGE,
 )
 from .ratings import rating_rules
-
-AVERAGE_TORSO_CM = 50  # shoulder-centre to hip-centre for an average adult; only used to make % readable
 
 
 @dataclass

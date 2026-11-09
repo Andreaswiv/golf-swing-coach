@@ -30,7 +30,7 @@ def _create_estimator() -> PoseEstimator:
 def _create_club_detector():
     from .club.detector import OnnxClubDetector
 
-    return OnnxClubDetector(settings.club_model_path)
+    return OnnxClubDetector(settings.club_model_path, threads=settings.club_threads)
 
 
 jobs = JobManager(settings, _create_estimator, _create_club_detector if settings.club_detection else None)

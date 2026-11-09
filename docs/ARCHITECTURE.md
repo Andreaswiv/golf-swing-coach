@@ -26,11 +26,12 @@ The API and the CV service share the `./data` folder. Every path in the database
 | Method and path | Purpose |
 |---|---|
 | `POST /analyses` | multipart: `video`, `cameraAngle` (`face_on`\|`down_the_line`), `handedness` (`right`\|`left`), optional `club`. Returns `201` with the analysis |
-| `GET /analyses` | newest first |
+| `GET /analyses` | newest first; `swing` leaves out the per-frame `club.track` and `rejected_landmarks` |
 | `GET /analyses/{id}` | status, progress, stage, error, video details, quality report, swing analysis |
 | `GET /analyses/{id}/video` | the original file, with HTTP range support for seeking |
 | `GET /analyses/{id}/keypoints` | the raw keypoints JSON |
-| `POST /analyses/{id}/reanalyze` | re-runs the swing analysis from the saved keypoints and replaces phases and measurements; `409` if not completed |
+| `POST /analyses/{id}/reanalyze` | re-runs the swing analysis from the saved keypoints and replaces the stored result; `409` if not completed |
+| `POST /analyses/reanalyze` | the same for every completed analysis. Returns `{ updated, failed }`; one that fails is logged and skipped |
 | `DELETE /analyses/{id}` | removes rows and files; `409` while still processing |
 | `GET /health/live`, `GET /health` | liveness; dependency readiness (database, CV service, model file) |
 
@@ -65,7 +66,7 @@ Errors use RFC 7807 problem details (`title`, `detail`). Status values: `queued`
 
 `x`, `y` are 0..1 across the displayed frame with the origin at the top left. `z` is a relative depth hint from the model, not a measurement. `t` is the frame's timestamp in seconds (taken from the container so variable-frame-rate phone footage stays in sync with the browser player). `n` is how many people were detected; `lm` is the chosen golfer, or `null` when nobody was found. The data is raw: not smoothed and not mirrored for left-handed golfers.
 
-## Swing analysis (`swing-0.5`)
+## Swing analysis (`swing-0.6`)
 
 `cv-service/app/swing`, run at the end of every job and by `POST /analyze`:
 
@@ -83,6 +84,6 @@ Result: `version`, `status` (`ok`, `no_swing_found`, `error`), `phases[]` (`name
 
 ## Database
 
-`Videos` (file, camera angle, handedness, club, resolution, fps, duration, frames) 1 to many `Analyses` (status, progress, stage, pipeline version, pose model, quality JSON) 1 to 1 `KeypointSets` (file path, frame count, format), and 1 to many `Phases` and `Measurements`. `Analyses.SwingJson` holds the whole swing analysis result (passed through to the frontend as `swing`); `Phases` and `Measurements` hold the same numbers as rows for querying across swings, replaced on every re-analysis. Deleting an analysis cascades; the video is deleted with its last analysis.
+`Videos` (file, camera angle, handedness, club, resolution, fps, duration, frames) 1 to many `Analyses` (status, progress, stage, pipeline version, pose model, quality JSON) 1 to 1 `KeypointSets` (file path, frame count, format). `Analyses.SwingJson` holds the whole swing analysis result (passed through to the frontend as `swing`) and is replaced on every re-analysis. Deleting an analysis cascades; the video is deleted with its last analysis.
 
 Planned extensions (not built): `Users` (add `UserId` to Videos), `Findings`, `Drills`, `Recommendations`, `Comparisons`.

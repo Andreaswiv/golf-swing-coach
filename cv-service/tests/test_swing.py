@@ -429,7 +429,8 @@ def test_feedback_text_never_contains_raw_placeholders():
 
 def test_analyse_swing_includes_feedback():
     result = analyse_swing(make_payload())
-    assert result["version"] == "swing-0.5"
+    assert result["version"] == "swing-0.6"
+    assert result["limits"]["tempo_good"] == [2.3, 4.0]
     assert result["feedback"]["summary"]
     assert analyse_swing(make_payload(still=True))["feedback"] is None
 

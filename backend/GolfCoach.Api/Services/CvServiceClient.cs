@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using GolfCoach.Api.Domain;
+using Microsoft.Extensions.Options;
 
 namespace GolfCoach.Api.Services;
 
@@ -33,14 +34,6 @@ public sealed record CvResult(
     JsonElement Quality,
     JsonElement? Swing);
 
-// Swing analysis result (cv-service/app/swing). Kept whole as JSON; these records read the parts stored as rows.
-public sealed record CvSwingPhase(string Name, int FrameIndex, double TimestampS, string Method, double Confidence);
-
-public sealed record CvSwingMeasurement(
-    string Name, string? Phase, int FrameIndex, double Value, string Unit, string Type, double Confidence);
-
-public sealed record CvSwing(string Version, string Status, List<CvSwingPhase> Phases, List<CvSwingMeasurement> Measurements);
-
 public sealed record CvAnalyzeRequest(string KeypointsPath);
 
 public sealed record CvJobState(
@@ -67,8 +60,20 @@ public interface ICvServiceClient
     Task<JsonElement> AnalyzeAsync(string keypointsPath, CancellationToken ct);
 }
 
-public sealed class CvServiceClient(HttpClient http) : ICvServiceClient
+/// <summary>
+/// Uses the CV service running directly on this machine when it is healthy (inference can be several
+/// times faster than in Docker's VM), otherwise the one in Docker. One instance follows one analysis:
+/// polling goes to the service that got the job.
+/// </summary>
+public sealed class CvServiceClient(HttpClient http, IOptions<CvServiceOptions> options) : ICvServiceClient
 {
+    private static readonly TimeSpan NativeProbeLimit = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan DockerProbeLimit = TimeSpan.FromSeconds(30);
+
+    private readonly Uri _docker = new(options.Value.BaseUrl);
+    private readonly Uri? _native = string.IsNullOrWhiteSpace(options.Value.NativeUrl) ? null : new(options.Value.NativeUrl);
+    private Uri? _jobHost;
+
     public static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -77,7 +82,8 @@ public sealed class CvServiceClient(HttpClient http) : ICvServiceClient
 
     public async Task<CvJobState> SubmitJobAsync(CvJobRequest request, CancellationToken ct)
     {
-        using var response = await http.PostAsJsonAsync("/jobs", request, Json, ct);
+        _jobHost = await ChooseHostAsync(ct);
+        using var response = await http.PostAsJsonAsync(new Uri(_jobHost, "/jobs"), request, Json, ct);
         if (!response.IsSuccessStatusCode)
             throw new CvServiceException($"CV service rejected the job ({(int)response.StatusCode}): {await response.Content.ReadAsStringAsync(ct)}");
 
@@ -87,7 +93,18 @@ public sealed class CvServiceClient(HttpClient http) : ICvServiceClient
 
     public async Task<CvJobState?> GetJobAsync(string jobId, CancellationToken ct)
     {
-        using var response = await http.GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}", ct);
+        var host = _jobHost ?? _docker;
+        HttpResponseMessage sent;
+        try
+        {
+            sent = await http.GetAsync(new Uri(host, $"/jobs/{Uri.EscapeDataString(jobId)}"), ct);
+        }
+        catch (HttpRequestException) when (host == _native)
+        {
+            return null; // the native service went away: the worker resubmits, which falls back to Docker
+        }
+
+        using var response = sent;
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<CvJobState>(Json, ct);
@@ -95,25 +112,41 @@ public sealed class CvServiceClient(HttpClient http) : ICvServiceClient
 
     public async Task<JsonElement> AnalyzeAsync(string keypointsPath, CancellationToken ct)
     {
-        using var response = await http.PostAsJsonAsync("/analyze", new CvAnalyzeRequest(keypointsPath), Json, ct);
+        var host = await ChooseHostAsync(ct);
+        using var response = await http.PostAsJsonAsync(new Uri(host, "/analyze"), new CvAnalyzeRequest(keypointsPath), Json, ct);
         if (!response.IsSuccessStatusCode)
             throw new CvServiceException($"CV service could not analyse the swing ({(int)response.StatusCode}): {await response.Content.ReadAsStringAsync(ct)}");
         return await response.Content.ReadFromJsonAsync<JsonElement>(Json, ct);
     }
 
-    public async Task<CvHealth?> GetHealthAsync(CancellationToken ct)
+    public async Task<CvHealth?> GetHealthAsync(CancellationToken ct) =>
+        await HealthyNativeAsync(ct) ?? await HealthAsync(_docker, DockerProbeLimit, ct);
+
+    private async Task<Uri> ChooseHostAsync(CancellationToken ct) =>
+        await HealthyNativeAsync(ct) is null ? _docker : _native!;
+
+    private async Task<CvHealth?> HealthyNativeAsync(CancellationToken ct)
     {
+        if (_native is null) return null;
+        var health = await HealthAsync(_native, NativeProbeLimit, ct);
+        return health is { Status: "ok" } ? health : null;
+    }
+
+    private async Task<CvHealth?> HealthAsync(Uri host, TimeSpan limit, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(limit);
         try
         {
-            using var response = await http.GetAsync("/health", ct);
+            using var response = await http.GetAsync(new Uri(host, "/health"), timeout.Token);
             if (!response.IsSuccessStatusCode) return null;
-            return await response.Content.ReadFromJsonAsync<CvHealth>(Json, ct);
+            return await response.Content.ReadFromJsonAsync<CvHealth>(Json, timeout.Token);
         }
         catch (HttpRequestException)
         {
             return null;
         }
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             return null; // timeout
         }

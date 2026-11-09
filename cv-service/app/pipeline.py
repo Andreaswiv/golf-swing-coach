@@ -4,7 +4,7 @@ Responsibilities:
   * decode the video frame by frame
   * run a ``PoseEstimator`` on every frame
   * pick the golfer when several people are detected
-  * find the swing from the pose and run the (much slower) club detector only
+  * find the swing from the pose and run the club detector only
     around it, in a second pass over the video
   * write the RAW (unsmoothed, unmirrored) keypoints to a JSON file
   * run the quality checks
@@ -45,7 +45,7 @@ LENGTH_TOLERANCE_S = 0.05  # container rounding: a "15 s" phone clip can be 15.0
 # Club detection runs from this long before the takeaway to this long after the finish.
 CLUB_LEAD_S = 1.0
 CLUB_TAIL_S = 0.3
-CLUB_PASS_START_PCT = 30  # progress when the club pass starts (it takes most of the time)
+CLUB_PASS_START_PCT = 70  # progress when the club pass starts (pose takes most of the time)
 
 log = logging.getLogger("cv.pipeline")
 
@@ -210,8 +210,8 @@ def run_pipeline(
     if meta.duration_seconds:
         _check_length(meta.duration_seconds)
 
-    # Pose first, on every frame: it is fast, and it is how the swing is found. The club detector
-    # is about ten times slower per frame, so it only runs around the swing (second pass).
+    # Pose first, on every frame: it is how the swing is found. The club detector then only has
+    # to run around the swing (second pass).
     pose_end = CLUB_PASS_START_PCT if club_detector else 94
     stage = "Detecting pose"
     progress(4, stage)

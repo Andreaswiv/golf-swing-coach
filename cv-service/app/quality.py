@@ -52,13 +52,21 @@ class QualityReport:
         }
 
 
+# Phones report "60 fps" as 59.94, 59.6 and the like. Within this share of a rate, it counts as that rate.
+FPS_TOLERANCE = 0.98
+
+
+def _reaches(fps: float, rate: float) -> bool:
+    return fps >= rate * FPS_TOLERANCE
+
+
 def temporal_resolution_factor(fps: float) -> float:
     """Multiplier (0..1) for confidence of speed/timing dependent measurements."""
-    if fps >= 120:
+    if _reaches(fps, 120):
         return 1.0
-    if fps >= 60:
+    if _reaches(fps, 60):
         return 0.9
-    if fps >= 30:
+    if _reaches(fps, 30):
         return 0.6
     return 0.4
 
@@ -76,7 +84,7 @@ def assess_quality(
     factor = temporal_resolution_factor(meta.fps)
     stats["fps"] = meta.fps
     stats["temporal_resolution_factor"] = factor
-    if meta.fps < 30:
+    if not _reaches(meta.fps, 30):
         warnings.append(
             QualityWarning(
                 "low_fps",
@@ -87,7 +95,7 @@ def assess_quality(
                 "preferably 120 FPS.",
             )
         )
-    elif meta.fps < 60:
+    elif not _reaches(meta.fps, 60):
         warnings.append(
             QualityWarning(
                 "low_fps",

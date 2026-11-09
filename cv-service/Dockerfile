@@ -5,22 +5,25 @@
 # SwingTrace YOLO11m (AGPL-3.0, https://github.com/nishsm/golf-club-detection-swingtrace), pinned
 # to a commit and checked against a SHA-256 before it is loaded (.pt files are pickles). The
 # weights were inspected: they only reference PyTorch and Ultralytics model classes.
-# Converted to ONNX here so the service needs ONNX Runtime, not PyTorch (this stage is discarded).
+# Converted to ONNX here so the service needs ONNX Runtime, not PyTorch (this stage is discarded),
+# with a flexible input size (so portrait videos skip the grey padding), then quantized to 8 bits
+# (80 -> 25 MB and much faster on a CPU; tools/quantize_club_model.py).
 FROM python:3.12-slim AS club-model
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir "ultralytics==8.3.253" "onnx==1.23.2" "onnxslim==0.1.98"
+    && pip install --no-cache-dir "ultralytics==8.3.253" "onnx==1.23.2" "onnxslim==0.1.98" "onnxruntime==1.31.1"
 ARG CLUB_MODEL_COMMIT=3985bce45b9a4827d6ab1f7e8aeaeaa032ef6cd0
 ARG CLUB_MODEL_SHA256=fcda5469a9cede0d4745d15dc797cd2ebcca4bda8b4e7e717b0b8c00a56d8744
 WORKDIR /build
+COPY tools/quantize_club_model.py .
 RUN curl -fsSL -o best.pt \
        "https://raw.githubusercontent.com/nishsm/golf-club-detection-swingtrace/${CLUB_MODEL_COMMIT}/weights/best.pt" \
     && echo "${CLUB_MODEL_SHA256}  best.pt" | sha256sum -c - \
     && YOLO_CONFIG_DIR=/tmp/yolo YOLO_OFFLINE=1 python -c \
-       "from ultralytics import YOLO; YOLO('best.pt').export(format='onnx', imgsz=640, simplify=True)" \
-    && mv best.onnx club_swingtrace_yolo11m.onnx
+       "from ultralytics import YOLO; YOLO('best.pt').export(format='onnx', imgsz=640, dynamic=True, simplify=True)" \
+    && YOLO_CONFIG_DIR=/tmp/yolo YOLO_OFFLINE=1 python quantize_club_model.py best.onnx club_swingtrace_yolo11m_quant.onnx
 
 # ---- Stage 2: the service ------------------------------------------------------------------
 FROM python:3.12-slim
@@ -43,9 +46,9 @@ ARG POSE_MODEL_VARIANT=heavy
 RUN mkdir -p /app/models \
     && curl -fsSL -o /app/models/pose_landmarker_${POSE_MODEL_VARIANT}.task \
        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${POSE_MODEL_VARIANT}/float16/latest/pose_landmarker_${POSE_MODEL_VARIANT}.task"
-COPY --from=club-model /build/club_swingtrace_yolo11m.onnx /app/models/
+COPY --from=club-model /build/club_swingtrace_yolo11m_quant.onnx /app/models/
 ENV POSE_MODEL_PATH=/app/models/pose_landmarker_${POSE_MODEL_VARIANT}.task \
-    CLUB_MODEL_PATH=/app/models/club_swingtrace_yolo11m.onnx \
+    CLUB_MODEL_PATH=/app/models/club_swingtrace_yolo11m_quant.onnx \
     DATA_DIR=/data \
     PYTHONUNBUFFERED=1
 

@@ -110,88 +110,6 @@ namespace GolfCoach.Api.Data.Migrations
                     b.ToTable("KeypointSets");
                 });
 
-            modelBuilder.Entity("GolfCoach.Api.Domain.Measurement", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AnalysisId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("CameraAngle")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<double>("Confidence")
-                        .HasColumnType("double precision");
-
-                    b.Property<int>("FrameIndex")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<string>("Phase")
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Unit")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<double>("Value")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AnalysisId");
-
-                    b.ToTable("Measurements");
-                });
-
-            modelBuilder.Entity("GolfCoach.Api.Domain.Phase", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AnalysisId")
-                        .HasColumnType("uuid");
-
-                    b.Property<double>("Confidence")
-                        .HasColumnType("double precision");
-
-                    b.Property<string>("DetectionMethod")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)");
-
-                    b.Property<int>("FrameIndex")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<double>("TimestampSeconds")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AnalysisId");
-
-                    b.ToTable("Phases");
-                });
-
             modelBuilder.Entity("GolfCoach.Api.Domain.Video", b =>
                 {
                     b.Property<Guid>("Id")
@@ -273,35 +191,9 @@ namespace GolfCoach.Api.Data.Migrations
                     b.Navigation("Analysis");
                 });
 
-            modelBuilder.Entity("GolfCoach.Api.Domain.Measurement", b =>
-                {
-                    b.HasOne("GolfCoach.Api.Domain.Analysis", "Analysis")
-                        .WithMany("Measurements")
-                        .HasForeignKey("AnalysisId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Analysis");
-                });
-
-            modelBuilder.Entity("GolfCoach.Api.Domain.Phase", b =>
-                {
-                    b.HasOne("GolfCoach.Api.Domain.Analysis", "Analysis")
-                        .WithMany("Phases")
-                        .HasForeignKey("AnalysisId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Analysis");
-                });
-
             modelBuilder.Entity("GolfCoach.Api.Domain.Analysis", b =>
                 {
                     b.Navigation("KeypointSet");
-
-                    b.Navigation("Measurements");
-
-                    b.Navigation("Phases");
                 });
 
             modelBuilder.Entity("GolfCoach.Api.Domain.Video", b =>

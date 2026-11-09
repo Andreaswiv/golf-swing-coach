@@ -19,14 +19,16 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import {
-  CONFIDENT_VISIBILITY,
   JOINTS,
   SEGMENTS,
+  displayFrames,
   frameIndexAt,
   hasClubData,
   loadKeypoints,
   clubLineAt,
   rejectedByFrame,
+  smoothClubTrack,
+  type DisplayFrame,
   type KeypointFrame,
   type KeypointsFile,
   type ShaftLine,
@@ -138,14 +140,16 @@ export default function SwingPlayer({
     () => (keypoints ? rejectedByFrame(keypoints, rejectedLandmarks) : new Map<number, Set<number>>()),
     [keypoints, rejectedLandmarks],
   );
-  const settings = useRef({ showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected });
-  settings.current = { showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected };
+  const poses = useMemo(() => (keypoints ? displayFrames(keypoints, rejected) : []), [keypoints, rejected]);
+  const steadyClub = useMemo(() => (keypoints ? smoothClubTrack(clubTrack, keypoints) : clubTrack), [keypoints, clubTrack]);
+  const settings = useRef({ showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, steadyClub, poses });
+  settings.current = { showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, steadyClub, poses };
 
   const draw = useCallback((time: number) => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    const { showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected } = settings.current;
+    const { showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, steadyClub, poses } = settings.current;
 
     const dpr = window.devicePixelRatio || 1;
     const cw = video.clientWidth;
@@ -170,15 +174,14 @@ export default function SwingPlayer({
     const h = video.videoHeight * scale;
     const ox = (cw - w) / 2;
     const oy = (ch - h) / 2;
-    const frame = keypoints.frames[index];
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(ox, oy, w, h);
     ctx.clip(); // the plane line runs past the frame edge
     if (showPlane && plane) drawPlane(ctx, plane, ox, oy, w, h);
-    if (showSkeleton) drawSkeleton(ctx, frame, ox, oy, w, h, hideUncertain, rejected.get(index));
-    if (showClub) drawClub(ctx, clubLineAt(frame, index, clubTrack, w / h), ox, oy, w, h);
+    if (showSkeleton && poses[index]) drawSkeleton(ctx, poses[index], ox, oy, w, h, hideUncertain);
+    if (showClub) drawClub(ctx, clubLineAt(index, steadyClub), ox, oy, w, h);
     ctx.restore();
   }, [position]);
 
@@ -288,7 +291,7 @@ export default function SwingPlayer({
   // Toggling a setting while paused needs an explicit redraw (of the frame on screen).
   useEffect(() => {
     draw(shownTime());
-  }, [showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, clubTrack, rejected, draw, shownTime]);
+  }, [showSkeleton, hideUncertain, showClub, showPlane, plane, keypoints, steadyClub, poses, draw, shownTime]);
 
   // Fullscreen for the video AND its overlay. The browser's own fullscreen button only enlarges
   // the <video>, which leaves the skeleton and club behind, so it is replaced where possible.
@@ -360,7 +363,6 @@ export default function SwingPlayer({
 
   const frames = keypoints?.frames ?? [];
   const clipEnd = frames.length ? frames[frames.length - 1].t : 0;
-  const aspect = keypoints ? keypoints.video.width / keypoints.video.height : 1;
   const clubTracked = useMemo(() => (keypoints ? hasClubData(keypoints) : false), [keypoints]);
 
   return (
@@ -486,7 +488,6 @@ export default function SwingPlayer({
           frames={frames}
           showClubNote={clubTracked && showClub}
           clubTrack={clubTrack}
-          aspect={aspect}
         />
         {aspectMismatch && (
           <p role="alert" className="text-sm text-destructive">
@@ -613,20 +614,18 @@ function FrameNotes({
   frames,
   showClubNote,
   clubTrack,
-  aspect,
 }: {
   position: PositionStore;
   frames: KeypointFrame[];
   showClubNote: boolean;
   clubTrack?: (ClubTrackPoint | null)[];
-  aspect: number;
 }) {
   const frameIndex = useFrameIndex(position);
   const current = frames[frameIndex];
   if (!current) return null;
   return (
     <>
-      {showClubNote && !clubLineAt(current, frameIndex, clubTrack, aspect) && (
+      {showClubNote && !clubLineAt(frameIndex, clubTrack) && (
         <p className="text-sm text-muted-foreground">
           {current.club ? "The club was not found in this frame." : "The club is only tracked around the swing."}
         </p>
@@ -740,21 +739,18 @@ function frameMidpoint(frames: KeypointFrame[], index: number): number {
 
 function drawSkeleton(
   ctx: CanvasRenderingContext2D,
-  frame: KeypointFrame,
+  pose: DisplayFrame,
   ox: number,
   oy: number,
   w: number,
   h: number,
   hideUncertain: boolean,
-  dropped?: Set<number>,
 ) {
-  const lm = frame.lm;
-  if (!lm) return;
-  const px = (i: number) => ox + lm[i][0] * w;
-  const py = (i: number) => oy + lm[i][1] * h;
-  const confident = (i: number) => lm[i][3] >= CONFIDENT_VISIBILITY;
-  // Dropped by the analysis as impossible (a glitch or an over-long limb): never drawn.
-  const ok = (i: number) => !dropped?.has(i);
+  const px = (i: number) => ox + pose.points[i]![0] * w;
+  const py = (i: number) => oy + pose.points[i]![1] * h;
+  const confident = (i: number) => pose.sure[i];
+  // No position: not detected, or dropped by the analysis as impossible for too long to bridge.
+  const ok = (i: number) => pose.points[i] !== null;
   const lineWidth = Math.max(2, Math.min(w, h) / 160);
 
   ctx.lineCap = "round";

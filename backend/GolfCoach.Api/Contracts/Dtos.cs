@@ -22,6 +22,8 @@ public sealed record VideoDto(
 
 public sealed record KeypointsDto(int FrameCount, string DataFormat);
 
+public sealed record ReanalyzeAllDto(int Updated, int Failed);
+
 public sealed record AnalysisDto(
     Guid Id,
     AnalysisStatus Status,

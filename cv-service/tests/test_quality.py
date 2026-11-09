@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from app.quality import (
     FrameObservation,
@@ -49,6 +50,16 @@ def test_low_fps_warns_but_does_not_reject():
     assert "low_fps" in codes(report)
     assert report.stats["temporal_resolution_factor"] < 1.0
     assert report.overall == "warning"
+
+
+@pytest.mark.parametrize("fps", [59.6, 59.94, 59.969, 60.0])
+def test_phone_rates_around_60_fps_count_as_60(fps):
+    assert "low_fps" not in codes(assess_quality(_meta(fps=fps), _obs(), GOOD_LIGHT))
+    assert temporal_resolution_factor(fps) == 0.9
+
+
+def test_a_rate_clearly_below_60_still_warns():
+    assert "low_fps" in codes(assess_quality(_meta(fps=50), _obs(), GOOD_LIGHT))
 
 
 def test_very_low_fps_is_high_severity():
