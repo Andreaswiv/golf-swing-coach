@@ -10,12 +10,13 @@ import logging
 
 from .club import build_club_series, measure_club
 from .feedback import build_feedback
+from .limits import limits_for_display
 from .measurements import measure, timing_problem
 from .phases import PHASE_ORDER, NoSwingFound, detect_phases
 from .ratings import rate_measurements
 from .series import POLYORDER, build_series, rejected_landmarks
 
-SWING_ANALYSIS_VERSION = "swing-0.5"
+SWING_ANALYSIS_VERSION = "swing-0.6"
 
 log = logging.getLogger("cv.swing")
 
@@ -33,6 +34,7 @@ def analyse_swing(payload: dict) -> dict:
         "notes": [],
         "feedback": None,
         "club": {"tracked": False},
+        "limits": limits_for_display(),
     }
     try:
         series = build_series(payload)

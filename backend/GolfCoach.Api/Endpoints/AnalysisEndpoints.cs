@@ -22,6 +22,7 @@ public static class AnalysisEndpoints
         group.MapGet("/{id:guid}", Get);
         group.MapGet("/{id:guid}/video", GetVideo);
         group.MapGet("/{id:guid}/keypoints", GetKeypoints);
+        group.MapPost("/reanalyze", ReanalyzeAll);
         group.MapPost("/{id:guid}/reanalyze", Reanalyze);
         group.MapDelete("/{id:guid}", Delete);
         return app;
@@ -130,13 +131,36 @@ public static class AnalysisEndpoints
         return Results.File(path, "application/json");
     }
 
-    /// <summary>Re-runs the swing analysis from the saved keypoints, replacing phases and measurements.</summary>
+    /// <summary>Re-runs the swing analysis on every finished swing, for after a change to the analysis code or limits.</summary>
+    private static async Task<IResult> ReanalyzeAll(AppDbContext db, ICvServiceClient cv, ILoggerFactory loggers, CancellationToken ct)
+    {
+        var analyses = await db.Analyses.Include(a => a.KeypointSet)
+            .Where(a => a.Status == AnalysisStatus.Completed && a.KeypointSet != null)
+            .ToListAsync(ct);
+
+        var log = loggers.CreateLogger("ReanalyzeAll");
+        var failed = 0;
+        foreach (var analysis in analyses)
+        {
+            try
+            {
+                var swing = await cv.AnalyzeAsync(analysis.KeypointSet!.FilePath, ct);
+                analysis.SwingJson = swing.GetRawText();
+                await db.SaveChangesAsync(ct);
+            }
+            catch (Exception ex) when (ex is CvServiceException or HttpRequestException)
+            {
+                failed++; // one bad file must not stop the rest
+                log.LogWarning(ex, "Could not re-analyse {Id}.", analysis.Id);
+            }
+        }
+        return Results.Ok(new ReanalyzeAllDto(analyses.Count - failed, failed));
+    }
+
+    /// <summary>Re-runs the swing analysis from the saved keypoints, replacing the stored result.</summary>
     private static async Task<IResult> Reanalyze(Guid id, AppDbContext db, ICvServiceClient cv, CancellationToken ct)
     {
-        var analysis = await WithDetails(db)
-            .Include(a => a.Phases)
-            .Include(a => a.Measurements)
-            .FirstOrDefaultAsync(a => a.Id == id, ct);
+        var analysis = await WithDetails(db).FirstOrDefaultAsync(a => a.Id == id, ct);
         if (analysis is null) return NotFound(id);
         if (analysis.Status != AnalysisStatus.Completed || analysis.KeypointSet is null)
             return Results.Problem(detail: "Only finished analyses with keypoints can be re-analysed.", statusCode: 409,
@@ -157,7 +181,7 @@ public static class AnalysisEndpoints
                 title: "CV service unavailable");
         }
 
-        SwingResultMapper.Apply(db, analysis, swing);
+        analysis.SwingJson = swing.GetRawText();
         await db.SaveChangesAsync(ct);
         return Results.Ok(DtoMapper.ToDto(analysis));
     }
@@ -177,7 +201,7 @@ public static class AnalysisEndpoints
         var keypointsPath = analysis.KeypointSet?.FilePath ?? storage.KeypointsRelativePath(analysis.Id);
         var videoShared = await db.Analyses.AnyAsync(a => a.VideoId == video.Id && a.Id != analysis.Id, ct);
 
-        db.Analyses.Remove(analysis); // cascades to keypoint set, phases and measurements
+        db.Analyses.Remove(analysis); // cascades to the keypoint set
         if (!videoShared) db.Videos.Remove(video);
         await db.SaveChangesAsync(ct);
 

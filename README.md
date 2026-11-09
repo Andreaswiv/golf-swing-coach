@@ -1,11 +1,11 @@
 # Swing Coach: golf swing analysis from a phone video
 
-Upload a short video of a golf swing. The app finds the golfer's joints and the club in every
-frame, detects the swing phases (address, takeaway, top, impact, finish), measures posture,
+Upload a short video of a golf swing. The app finds the golfer's joints in every frame and the club
+around the swing, detects the swing phases (address, takeaway, top, impact, finish), measures posture,
 tempo and swing plane, rates each measurement green, yellow or red, and writes plain-language
 feedback with drills. The skeleton, club trail and swing plane are drawn over the video.
 
-Everything runs in Docker on one machine. Videos are not sent to any cloud service.
+Everything runs on one machine, in Docker by default. Videos are not sent to any cloud service.
 
 For what has been tested, what is missing and the known problems, see
 [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
@@ -16,8 +16,8 @@ Requirements:
 
 - Docker Desktop (macOS, or Windows with WSL 2) or Docker Engine with Compose v2 (Linux), with at
   least 6 GB of memory for Docker. All images build for both arm64 (Apple Silicon, ARM servers)
-  and x86_64 (Intel/AMD PCs, Intel Macs, most cloud servers). On Windows, run the `scripts/`
-  helpers from WSL or Git Bash; `docker compose` itself works from any terminal.
+  and x86_64 (Intel/AMD PCs, Intel Macs, most cloud servers). On Windows, run the `.sh`
+  helpers in `scripts/` from WSL or Git Bash; `docker compose` itself works from any terminal.
 - About 8 GB of free disk space for the images, plus space for videos.
 - Internet access for the first build (base images, packages and the two models).
 
@@ -41,6 +41,27 @@ scripts/verify.sh                         # health checks only
 scripts/verify.sh ~/Movies/swing.mp4      # also uploads a video and waits for the result
 ANGLE=down_the_line HAND=left scripts/verify.sh swing.mov
 ```
+
+## Faster analysis
+
+Analysis can be much faster when the CV service runs directly on the computer instead of inside Docker's virtual machine. 
+
+Do this once per computer, with Docker running and Python 3.12:
+
+```bash
+python3.12 scripts/native_cv.py install
+```
+
+On Windows, run `py -3.12 scripts\native_cv.py install` in normal Windows Python, not in WSL.
+
+It then starts by itself at login. The API uses it whenever it is healthy and otherwise uses the
+CV service in Docker, including when it stops partway through an analysis. Run the command again
+after changing the CV service or its settings in `.env`. `python3.12 scripts/native_cv.py uninstall`
+removes it.
+
+The switching between the two and the automatic start were tried on macOS only. Linux and Windows
+have not been tested; if the service does not start there, analyses still run in Docker. See
+[DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md).
 
 ## Recording a video that analyses well
 
@@ -76,9 +97,13 @@ Browser ──> web (nginx :5173) ──/api──> api (ASP.NET Core :8080) ─
                                            └── ./data (videos, keypoints) ─────┘  shared folder
 ```
 
+If the CV service is also installed directly on the computer (see "Faster analysis"), it listens on
+port 8001 and the API uses it first. It shares the same `./data` folder.
+
 1. The browser uploads the video to the API. The API checks it (type, size, file header), saves
    it to `data/videos/`, creates an `Analysis` row and queues it.
-2. A background worker sends the job to the CV service and copies its progress into the database.
+2. A background worker sends the job to the CV service (the one installed directly on the computer
+   if it is healthy, otherwise the one in Docker) and copies its progress into the database.
 3. The CV service runs the pose model on every frame and the club model on the frames around the
    swing. It writes the keypoints to `data/keypoints/{id}.json`, then runs the swing analysis:
    phases, measurements, ratings and feedback.
@@ -87,6 +112,7 @@ Browser ──> web (nginx :5173) ──/api──> api (ASP.NET Core :8080) ─
 The swing analysis can be re-run on saved keypoints in about a second, without the models
 ("Re-analyse" on the analysis page, or `POST /api/analyses/{id}/reanalyze`). Do this after
 changing analysis code or rating limits: ratings are stored when a swing is analysed.
+`POST /api/analyses/reanalyze` does it for every completed swing.
 
 ## Technology
 
@@ -95,9 +121,9 @@ changing analysis code or rating limits: ratings are stored when a swing is anal
 | Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 4, shadcn/ui (Radix), lucide icons |
 | API | ASP.NET Core (.NET 10), EF Core with migrations, Npgsql |
 | Computer vision | Python 3.12, FastAPI, OpenCV, MediaPipe Pose Landmarker (heavy), ONNX Runtime |
-| Club detection | SwingTrace YOLO11m, converted to ONNX at build time |
+| Club detection | SwingTrace YOLO11m, converted to ONNX and quantized to 8 bits at build time |
 | Database | PostgreSQL 16 (structured data only; videos and keypoints are files) |
-| Runtime | Docker Compose |
+| Runtime | Docker Compose, optionally with the CV service directly on the computer |
 
 Feedback comes from a fixed rules engine (`cv-service/app/swing/feedback.py`), not a language
 model, so it can never claim something the measurements do not show.
@@ -114,7 +140,7 @@ cv-service/     FastAPI service
 frontend/       React app: src/pages, src/components (ui/ = shadcn components, home/ = homepage)
 data/           videos/ and keypoints/ (git-ignored: personal data)
 docs/           ARCHITECTURE.md, RATING_SOURCES.md
-scripts/        doctor.sh, verify.sh, download_pose_model.sh
+scripts/        doctor.sh, verify.sh, download_pose_model.sh, native_cv.py
 ```
 
 ## Configuration
@@ -127,11 +153,18 @@ The defaults work as they are. To change something, copy `.env.example` to `.env
 | `MAX_PROCESS_DIM` | `1280` | Longest video side used for pose estimation (lower is faster) |
 | `NUM_POSES` | `2` | People the pose model may report per frame (for the multiple-people warning) |
 | `UPLOAD_MAX_MB` | `500` | Upload size limit |
+| `CV_NATIVE_URL` | `http://host.docker.internal:8001` | The CV service running directly on this computer, tried first. Empty = always use Docker. See "Faster analysis" |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `golfcoach`, `golfcoach`, `golfcoach_dev` | Database settings. Change the password before running anywhere but your own computer |
 
-The CV service also reads `CLUB_DETECTION=0` (turns club detection off) and `CLUB_MODEL_PATH`.
+The CV service also reads `CLUB_DETECTION=0` (turns club detection off), `CLUB_MODEL_PATH` and
+`CLUB_THREADS` (0 lets ONNX Runtime choose).
 
-All ports bind to `127.0.0.1`, so the app is reachable only from the computer it runs on.
+If the CV service is installed directly on the computer, it follows `POSE_MODEL_VARIANT`,
+`MAX_PROCESS_DIM` and `NUM_POSES` too. Run `scripts/native_cv.py install` again after changing them.
+
+All Docker ports bind to `127.0.0.1`, so the app is reachable only from the computer it runs on. The
+CV service installed directly on the computer does the same, except on Linux, where it listens on
+Docker's internal bridge address so that containers can reach it.
 
 ## Development
 
@@ -149,7 +182,7 @@ docker run --rm -e PYTHONPATH=/src -v "$PWD/cv-service:/src" -w /src golfcoach-c
 # API unit tests (needs the .NET 10 SDK)
 cd backend && dotnet test GolfCoach.slnx
 
-# Frontend type check and production build
+# Frontend type check and production build (Node 20.19+ or 22.12+)
 cd frontend && npm install && npm run build
 ```
 
@@ -171,13 +204,13 @@ POSE_MODEL_PATH=$PWD/models/pose_landmarker_heavy.task DATA_DIR=$PWD/../data CLU
 # The club model is only built inside Docker (see cv-service/Dockerfile). To use it outside
 # Docker, copy it out of the image:
 #   docker create --name tmp golfcoach-cv-service
-#   docker cp tmp:/app/models/club_swingtrace_yolo11m.onnx models/ && docker rm tmp
-# then drop CLUB_DETECTION=0 and set CLUB_MODEL_PATH=$PWD/models/club_swingtrace_yolo11m.onnx
+#   docker cp tmp:/app/models/club_swingtrace_yolo11m_quant.onnx models/ && docker rm tmp
+# then drop CLUB_DETECTION=0 and set CLUB_MODEL_PATH=$PWD/models/club_swingtrace_yolo11m_quant.onnx
 
 # 3. API
 cd backend/GolfCoach.Api && dotnet run          # http://localhost:8080
 
-# 4. frontend
+# 4. frontend (Node 20.19+ or 22.12+)
 cd frontend && npm install && npm run dev        # http://localhost:5173, proxies /api to :8080
 ```
 
@@ -208,7 +241,7 @@ your source code.
 ## Third-party material
 
 - **Club model:** [SwingTrace](https://github.com/nishsm/golf-club-detection-swingtrace) is
-  AGPL-3.0, and Ultralytics (used to convert it at build time) is AGPL-3.0. The weights are
+  AGPL-3.0, and Ultralytics (used to convert and calibrate it at build time) is AGPL-3.0. The weights are
   downloaded during the Docker build, not stored in this repository.
 - **Pose model:** MediaPipe Pose Landmarker, Apache-2.0.
 - **Fonts:** Aspekta (SIL Open Font License) is self-hosted in `frontend/public/fonts`. Plus

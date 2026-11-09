@@ -90,21 +90,23 @@ class JobManager:
         self._update(job_id, status="running", progress=1, stage="Starting")
         try:
             club = self._create_club_detector()
-            with self._factory() as estimator:
-                output = run_pipeline(
-                    video_path=video_abs,
-                    keypoints_path=keypoints_abs,
-                    estimator=estimator,
-                    camera_angle=request.camera_angle,
-                    handedness=request.handedness,
-                    on_progress=lambda pct, stage: self._update(
-                        job_id, progress=pct, stage=stage
-                    ),
-                    max_process_dim=self._settings.max_process_dim,
-                    club_detector=club,
-                )
-            if club is not None:
-                club.close()
+            try:
+                with self._factory() as estimator:
+                    output = run_pipeline(
+                        video_path=video_abs,
+                        keypoints_path=keypoints_abs,
+                        estimator=estimator,
+                        camera_angle=request.camera_angle,
+                        handedness=request.handedness,
+                        on_progress=lambda pct, stage: self._update(
+                            job_id, progress=pct, stage=stage
+                        ),
+                        max_process_dim=self._settings.max_process_dim,
+                        club_detector=club,
+                    )
+            finally:
+                if club is not None:
+                    club.close()
             result = {
                 "pipeline_version": PIPELINE_VERSION,
                 "pose_model": output.pose_model,

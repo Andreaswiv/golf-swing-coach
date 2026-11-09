@@ -1,15 +1,13 @@
 using System.Text.Json;
 using GolfCoach.Api.Contracts;
-using GolfCoach.Api.Data;
 using GolfCoach.Api.Domain;
 using GolfCoach.Api.Services;
-using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace GolfCoach.Api.Tests;
 
-/// <summary>Swing results from the CV service become JSON plus Phase and Measurement rows.</summary>
-public class SwingResultMapperTests
+/// <summary>Swing results from the CV service are stored as JSON and passed through to the frontend.</summary>
+public class DtoMapperTests
 {
     // Shape copied from cv-service/app/swing/__init__.py (analyse_swing).
     private const string SwingJson = """
@@ -28,54 +26,10 @@ public class SwingResultMapperTests
     }
     """;
 
-    // Model building and change tracking work without a database connection.
-    private static AppDbContext OfflineDb() =>
-        new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql("Host=unused").Options);
-
     private static Analysis NewAnalysis()
     {
         var video = new Video { CameraAngle = CameraAngle.DownTheLine };
         return new Analysis { Video = video, VideoId = video.Id };
-    }
-
-    [Fact]
-    public void Stores_json_and_rows()
-    {
-        using var db = OfflineDb();
-        var analysis = NewAnalysis();
-        using var doc = JsonDocument.Parse(SwingJson);
-
-        SwingResultMapper.Apply(db, analysis, doc.RootElement);
-
-        Assert.Contains("slow_motion_suspected", analysis.SwingJson);
-        var phases = db.ChangeTracker.Entries<Phase>().Select(e => e.Entity).ToList();
-        Assert.Equal(["address", "impact"], phases.Select(p => p.Name));
-        Assert.Equal(7.6333, phases[1].TimestampSeconds);
-        Assert.Equal("lowest_hands_after_fastest_downswing", phases[1].DetectionMethod);
-        Assert.All(phases, p => Assert.Equal(analysis.Id, p.AnalysisId));
-
-        var measurements = db.ChangeTracker.Entries<Measurement>().Select(e => e.Entity).ToList();
-        var spine = measurements.Single(m => m.Name == "spine_angle_address");
-        Assert.Equal(MeasurementType.Measured, spine.Type);
-        Assert.Equal(CameraAngle.DownTheLine, spine.CameraAngle);
-        Assert.Equal(40.1, spine.Value);
-        Assert.Equal(MeasurementType.Estimated, measurements.Single(m => m.Name == "tempo_ratio").Type);
-    }
-
-    [Fact]
-    public void Re_applying_replaces_previous_rows()
-    {
-        using var db = OfflineDb();
-        var analysis = NewAnalysis();
-        var old = new Phase { AnalysisId = analysis.Id, Name = "top" };
-        analysis.Phases.Add(old);
-        db.Attach(old);
-        using var doc = JsonDocument.Parse(SwingJson);
-
-        SwingResultMapper.Apply(db, analysis, doc.RootElement);
-
-        Assert.Equal(EntityState.Deleted, db.Entry(old).State);
-        Assert.Equal(2, db.ChangeTracker.Entries<Phase>().Count(e => e.State == EntityState.Added));
     }
 
     [Fact]

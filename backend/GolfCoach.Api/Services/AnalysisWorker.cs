@@ -221,7 +221,7 @@ public sealed class AnalysisWorker(
             DataFormat = result.Keypoints.DataFormat,
         };
         if (result.Swing is { ValueKind: JsonValueKind.Object } swing)
-            SwingResultMapper.Apply(db, analysis, swing);
+            analysis.SwingJson = swing.GetRawText();
         analysis.Status = AnalysisStatus.Completed;
         analysis.Progress = 100;
         analysis.Stage = "Completed";

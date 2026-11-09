@@ -1,6 +1,6 @@
 # Development status
 
-Last updated: 2026-11-01. Swing analysis version: `swing-0.5`.
+Last updated: 2026-11-09. Swing analysis version: `swing-0.6`.
 
 This file is for anyone picking up the project: what works, how well it has been checked, what is
 missing and where the risks are. Setup instructions are in [README.md](README.md).
@@ -18,8 +18,8 @@ prototype, **not** ready to be put on the internet (see [Before deploying public
 | Area | Verified | Not verified |
 |---|---|---|
 | Docker | All four images build and run on Apple Silicon (linux/arm64); `scripts/verify.sh` passes | Running the whole stack on a real x86_64 machine (on 2026-11-01 all three images were built for linux/amd64 under emulation, the CV image's build loaded and ran both models, and the 92 CV tests passed inside it) |
-| CV service | 92/92 pytest tests on 2026-11-01: pipeline, HTTP API, series cleaning, phases, measurements, club analysis, ratings, feedback, slow-motion tempo, and a regression test on a tour professional's swing. The image build loads both models and runs them on one frame | |
-| API | 19/19 unit tests on 2026-11-01 (.NET 10 SDK in Docker). Upload, validation, queue, worker, re-analyse, range requests for video, keypoints download and delete checked by hand | |
+| CV service | 97/97 pytest tests on 2026-11-09: pipeline, HTTP API, series cleaning, phases, measurements, club analysis, ratings, feedback, slow-motion tempo, and a regression test on a tour professional's swing. The image build loads both models and runs them on one frame | |
+| API | 23/23 unit tests on 2026-11-09 (.NET 10 SDK in Docker). Upload, validation, queue, worker, re-analyse, range requests for video, keypoints download and delete checked by hand | |
 | Frontend | Type check and production build; all pages used by hand in a desktop browser on macOS | Other browsers, and real phones (the layout is responsive; an earlier version was checked at phone width in headless Chromium) |
 | End to end | Real down-the-line swings (normal speed and slow motion), including a tour professional's slow-motion clip: phases checked by eye against the video frames | Face-on and left-handed swings on real video (covered by synthetic tests only); clips with known faults (to prove the rules catch them) |
 
@@ -78,7 +78,8 @@ prototype, **not** ready to be put on the internet (see [Before deploying public
    ball, hand path, head shift, shaft past parallel). They are calibrated so the tour swing fixture
    gets no faults. See [docs/RATING_SOURCES.md](docs/RATING_SOURCES.md).
 3. **Ratings are stored at analysis time.** After changing limits or analysis code, older swings
-   keep their old results until "Re-analyse" is clicked. A bulk re-analyse does not exist yet.
+   keep their old results until "Re-analyse" is clicked, or until `POST /api/analyses/reanalyze`
+   is called for all of them (there is no button for that).
 4. **Long videos are only stopped after upload.** The browser refuses clips over 15 seconds, and the
    CV service fails the job with a clear message if one gets through, but the API itself does not
    check the length, so the file is uploaded and stored first.
@@ -120,3 +121,23 @@ The current setup assumes one trusted user on their own computer. Before putting
   heavy pose model, shadcn/ui redesign with the animated homepage, player sync fixes, rating limits
   checked against published sources (shoulder tilt at impact widened, downswing duration
   tightened).
+- **swing-0.6:** limits sent to the frontend with each result, bulk re-analyse endpoint, unused
+  `Phases` and `Measurements` tables dropped, club line drawn only from the analysis' cleaned track,
+  performance work (faster spike detection, gzip, smaller list response).
+- **Pipeline 0.4.0 (2026-11-09):** club model quantized to 8 bits (80 to 25 MB) with an input that
+  follows the video's shape. An 8.5 s, 251-frame video on an M1: 333 s before, 134 s in Docker, 36 s
+  with the CV service running natively. Checked on that one video against the old model: same phases,
+  ratings and findings in Docker, club positions typically within 1 px (95% within 3 px), and within
+  about 2 px on darkened and brightened frames. Running pose natively instead of in Docker changes
+  results slightly on its own (one phase by 1 frame, one borderline finding). The `full` pose model
+  and `NUM_POSES=1` were tested and rejected: they move landmarks well beyond that noise.
+- **Native CV service (2026-11-09):** `scripts/native_cv.py` installs the CV service directly on the
+  computer with auto-start; the API uses it when healthy and otherwise the one in Docker. Routing
+  was tested end to end on macOS (upload: 34 s, no job reached Docker; native service killed at 24%:
+  Docker finished the analysis). The launchd setup installs on macOS and launchd starts the service
+  and restarts it when it exits; starting at login has not been observed yet. The Linux and Windows
+  paths have not been run.
+- **Steadier overlay (2026-11-09):** the player smooths the skeleton and club for drawing (strongly when
+  nearly still, lightly when fast) and keeps joints from flickering. The analysis is unaffected. On
+  three real swings joint on/off switches fell by about 85% and wobble at address about 10x. Frame
+  rates within 2% of 30, 60 or 120 fps now count as that rate.

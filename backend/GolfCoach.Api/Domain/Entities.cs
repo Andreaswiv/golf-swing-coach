@@ -6,9 +6,6 @@ public enum Handedness { Right, Left }
 
 public enum AnalysisStatus { Queued, Processing, Completed, Failed }
 
-/// <summary>Measured = a 2D value taken directly from keypoints. Estimated = a derived indicator.</summary>
-public enum MeasurementType { Measured, Estimated }
-
 public class Video
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -53,10 +50,7 @@ public class Analysis
     /// <summary>Quality report from the CV service, stored as jsonb.</summary>
     public string? QualityJson { get; set; }
 
-    /// <summary>
-    /// Full swing analysis result from the CV service (status, notes, phases, measurements), stored as jsonb.
-    /// Phases and Measurements below hold the same numbers as rows, for querying across swings.
-    /// </summary>
+    /// <summary>Full swing analysis result from the CV service (status, notes, phases, measurements), stored as jsonb.</summary>
     public string? SwingJson { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -64,8 +58,6 @@ public class Analysis
     public DateTime? CompletedAt { get; set; }
 
     public KeypointSet? KeypointSet { get; set; }
-    public List<Phase> Phases { get; set; } = [];
-    public List<Measurement> Measurements { get; set; } = [];
 }
 
 /// <summary>Points at the per-frame keypoint JSON file. The keypoints themselves never live in the database.</summary>
@@ -78,34 +70,4 @@ public class KeypointSet
     public string FilePath { get; set; } = "";
     public int FrameCount { get; set; }
     public string DataFormat { get; set; } = "";
-}
-
-/// <summary>A detected swing event (address, takeaway, top, impact, finish). Written by the swing analysis.</summary>
-public class Phase
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid AnalysisId { get; set; }
-    public Analysis Analysis { get; set; } = null!;
-
-    public string Name { get; set; } = "";
-    public int FrameIndex { get; set; }
-    public double TimestampSeconds { get; set; }
-    public string DetectionMethod { get; set; } = "";
-    public double Confidence { get; set; }
-}
-
-public class Measurement
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid AnalysisId { get; set; }
-    public Analysis Analysis { get; set; } = null!;
-
-    public string Name { get; set; } = "";
-    public string? Phase { get; set; }
-    public int FrameIndex { get; set; }
-    public double Value { get; set; }
-    public string Unit { get; set; } = "";
-    public CameraAngle CameraAngle { get; set; }
-    public MeasurementType Type { get; set; }
-    public double Confidence { get; set; }
 }

@@ -57,7 +57,7 @@ export default function QualityReportView({ quality }: { quality: QualityReport 
         </div>
         <div>
           <dt className="text-muted-foreground">Frame rate</dt>
-          <dd className="tnum">{typeof s.fps === "number" ? `${s.fps} fps` : "–"}</dd>
+          <dd className="tnum">{typeof s.fps === "number" ? `${Math.round(s.fps)} fps` : "–"}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Timing confidence</dt>

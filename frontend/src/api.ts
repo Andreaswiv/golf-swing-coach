@@ -95,6 +95,14 @@ export interface ClubSummary {
   toes_from_ball?: number | null;
 }
 
+/** Limits the frontend draws or writes out (cv-service/app/swing/limits.py). % values are of torso length. */
+export interface SwingLimits {
+  average_torso_cm: number;
+  tempo_good: [number, number];
+  head_drop: number;
+  head_lift: number;
+}
+
 export interface SwingAnalysis {
   version: string;
   status: "ok" | "no_swing_found" | "error";
@@ -110,6 +118,8 @@ export interface SwingAnalysis {
   club?: ClubSummary;
   /** Frames where each joint (raw landmark name) was dropped as impossible. Absent before swing-0.5. */
   rejected_landmarks?: Record<string, number[]>;
+  /** Absent before swing-0.6. */
+  limits?: SwingLimits;
 }
 
 export interface VideoInfo {

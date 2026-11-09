@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, Check } from "lucide-react";
-import type { Analysis, Rating, SwingMeasurement } from "@/api";
+import type { Analysis, Rating, SwingLimits, SwingMeasurement } from "@/api";
 import { reducedMotion, useCountUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,6 @@ import type { SwingPoint } from "@/swingStats";
   The latest swing as a bento of soft cards beside the golfer's own pose. Every number is measured
   from the video; nothing here is a placeholder unless the swing does not have that measurement.
 */
-
-const AVERAGE_TORSO_CM = 50; // same assumption the feedback text uses to turn % of torso into cm
 
 function useGrown() {
   const [grown, setGrown] = useState(reducedMotion);
@@ -70,17 +68,14 @@ const RATING_STROKE: Record<Rating, string> = { good: "#3f9a3c", watch: "#d9a21b
 
 const TEMPO_MAX = 5;
 
-/** Good tempo, as in the ratings: TEMPO_RANGE in cv-service/app/swing/limits.py. */
-const TEMPO_GOOD = [2.3, 4.0] as const;
-
-function TempoGauge({ m }: { m: SwingMeasurement | null }) {
+function TempoGauge({ m, good }: { m: SwingMeasurement | null; good?: SwingLimits["tempo_good"] }) {
   const grown = useGrown();
   const tempo = m?.value ?? null;
   const frac = tempo === null ? 0 : Math.min(tempo / TEMPO_MAX, 1);
   const arc = (r: number) => `M${110 - r} 115 A${r} ${r} 0 0 1 ${110 + r} 115`;
   // Point on the dial for a tempo, at radius r (0 on the left, TEMPO_MAX on the right).
   const at = (v: number, r: number) => [110 - r * Math.cos((v / TEMPO_MAX) * Math.PI), 115 - r * Math.sin((v / TEMPO_MAX) * Math.PI)];
-  const [b0, b1] = [at(TEMPO_GOOD[0], 107), at(TEMPO_GOOD[1], 107)];
+  const band = good ? [at(good[0], 107), at(good[1], 107)] : null;
   const target = (3 / TEMPO_MAX) * Math.PI;
   return (
     <Card area="gauge" className="flex flex-col">
@@ -91,7 +86,9 @@ function TempoGauge({ m }: { m: SwingMeasurement | null }) {
         <svg viewBox="0 0 220 130" className="w-full overflow-visible">
           <path d={arc(95)} fill="none" stroke="#fafaf9" strokeWidth="16" strokeLinecap="round" />
           {/* The good range, as a green band just outside the dial. */}
-          <path d={`M${b0[0]} ${b0[1]} A107 107 0 0 1 ${b1[0]} ${b1[1]}`} fill="none" stroke="#3f9a3c" strokeOpacity="0.55" strokeWidth="4" strokeLinecap="round" />
+          {band && (
+            <path d={`M${band[0][0]} ${band[0][1]} A107 107 0 0 1 ${band[1][0]} ${band[1][1]}`} fill="none" stroke="#3f9a3c" strokeOpacity="0.55" strokeWidth="4" strokeLinecap="round" />
+          )}
           <path d={arc(76)} fill="none" stroke="#b9b9b5" strokeWidth="1.2" strokeDasharray="1 4" />
           <path
             d={arc(95)}
@@ -350,6 +347,8 @@ function Counted({ value }: { value: number | null }) {
 
 export function MetricsBento({ latest, points }: { latest: Analysis | null; points: SwingPoint[] }) {
   const m = (name: string) => latest?.swing?.measurements.find((x) => x.name === name) ?? null;
+  const limits = latest?.swing?.limits;
+  const toCm = (pctOfTorso: number) => pctOfTorso * ((limits?.average_torso_cm ?? 0) / 100);
   const spine = m("spine_angle_address");
   const knee = m("trail_knee_flex_address");
   const tempo = m("tempo_ratio");
@@ -383,7 +382,7 @@ export function MetricsBento({ latest, points }: { latest: Analysis | null; poin
         </div>
 
         <div className="bento mt-14 grid gap-5 font-aspekta">
-            <TempoGauge m={tempo} />
+            <TempoGauge m={tempo} good={limits?.tempo_good} />
             <Card area="spine">
               <Title>Spine angle</Title>
               <RatingPill rating={spine?.rating} />
@@ -394,13 +393,13 @@ export function MetricsBento({ latest, points }: { latest: Analysis | null; poin
               <Title>Head movement</Title>
               <RatingPill rating={head?.rating} />
               <Value
-                value={head ? Math.abs(head.value) * (AVERAGE_TORSO_CM / 100) : null}
+                value={head && limits ? toCm(Math.abs(head.value)) : null}
                 format={(v) => `${v.toFixed(1)} cm`}
               />
-              {head && (
+              {head && limits && (
                 <p className="mt-2 text-[14px] text-[#6b6b68]">
                   {head.value >= 0 ? "Up" : "Down"} at {head.name.endsWith("top") ? "the top" : "impact"} · good swings: under
-                  about {head.value >= 0 ? "4 cm up" : "10 cm down"}
+                  about {head.value >= 0 ? `${toCm(limits.head_lift).toFixed(0)} cm up` : `${toCm(limits.head_drop).toFixed(0)} cm down`}
                 </p>
               )}
             </Card>

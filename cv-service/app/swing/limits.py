@@ -9,6 +9,7 @@ follow it; the rest are calibrated so a tour player's swing (tests/fixtures) com
 from __future__ import annotations
 
 RELIABLE = 0.5  # measurements below this confidence are never a clear fault, nor praised
+AVERAGE_TORSO_CM = 50  # shoulder-centre to hip-centre for an average adult; only used to make % readable
 
 # Typical ranges (2D, degrees or % of torso length). (mild, clear) limits.
 SPINE_ADDRESS_RANGE = (28.0, 48.0)  # pros 41.5 ± 2.9 (5-iron, Kim et al. 2018); tour ~29 with driver (GOLFTEC)
@@ -34,3 +35,13 @@ HAND_PATH_INSIDE = (12.0, 22.0)
 SHAFT_INSIDE_TOES_CLEAR = 40.0  # % torso the shaft points inside the toes before it is a clear fault
 PAST_PARALLEL = 15.0  # degrees past parallel at the top (face-on) before it counts as an overswing
 SHORT_OF_PARALLEL = -45.0  # degrees at the top (negative = short of parallel); shorter gets no praise
+
+
+def limits_for_display() -> dict:
+    """The limits the frontend draws or writes out (the tempo dial, head movement in cm)."""
+    return {
+        "average_torso_cm": AVERAGE_TORSO_CM,
+        "tempo_good": list(TEMPO_RANGE),
+        "head_drop": HEAD_DROP[0],
+        "head_lift": HEAD_LIFT[0],
+    }
