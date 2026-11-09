@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using GolfCoach.Api.Domain;
 
 namespace GolfCoach.Api.Contracts;
@@ -40,7 +41,12 @@ public sealed record HealthDto(string Status, bool Database, bool CvService, boo
 
 public static class DtoMapper
 {
-    public static AnalysisDto ToDto(Analysis a)
+    public static AnalysisDto ToDto(Analysis a) => Build(a, ParseJson(a.SwingJson));
+
+    /// <summary>For the list of swings: leaves out the per-frame data only the video player needs.</summary>
+    public static AnalysisDto ToSummaryDto(Analysis a) => Build(a, ParseSwingSummary(a.SwingJson));
+
+    private static AnalysisDto Build(Analysis a, JsonElement? swing)
     {
         var v = a.Video;
         return new AnalysisDto(
@@ -57,7 +63,7 @@ public static class DtoMapper
                 v.Width, v.Height, v.Fps, v.DurationSeconds, v.Orientation, v.UploadedAt),
             ParseJson(a.QualityJson),
             a.KeypointSet is null ? null : new KeypointsDto(a.KeypointSet.FrameCount, a.KeypointSet.DataFormat),
-            ParseJson(a.SwingJson));
+            swing);
     }
 
     private static JsonElement? ParseJson(string? json)
@@ -65,5 +71,14 @@ public static class DtoMapper
         if (string.IsNullOrEmpty(json)) return null;
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
+    }
+
+    private static JsonElement? ParseSwingSummary(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        if (JsonNode.Parse(json) is not JsonObject swing) return ParseJson(json);
+        swing.Remove("rejected_landmarks");
+        (swing["club"] as JsonObject)?.Remove("track");
+        return JsonSerializer.SerializeToElement(swing);
     }
 }

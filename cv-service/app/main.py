@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from . import PIPELINE_VERSION
 from .config import Settings
 from .jobs import JobManager
+from .pipeline import KEYPOINTS_FORMAT
 from .pose.base import PoseEstimator
 from .schemas import AnalyzeRequest, JobRequest, JobState
 from .swing import analyse_swing
@@ -84,6 +85,6 @@ def analyze(request: AnalyzeRequest) -> dict:
         raise HTTPException(status_code=404, detail="Keypoints file not found.")
     with path.open(encoding="utf-8") as fh:
         payload = json.load(fh)
-    if payload.get("format") != "golfcoach.keypoints.v1":
+    if payload.get("format") != KEYPOINTS_FORMAT:
         raise HTTPException(status_code=400, detail=f"Unsupported keypoints format: {payload.get('format')}")
     return analyse_swing(payload)

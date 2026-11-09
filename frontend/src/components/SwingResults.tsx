@@ -1,8 +1,6 @@
-import { ChevronDown } from "lucide-react";
 import type { MomentName, Rating, SwingAnalysis, SwingMeasurement } from "@/api";
-import { Card } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MOMENT_LABEL, RATING, formatMeasurement, measurementInfo } from "@/swingLabels";
+import FoldCard from "./FoldCard";
 import InfoTip from "./InfoTip";
 
 /** Below this the value is shown with a "Low confidence" note (same limit as the feedback). */
@@ -33,10 +31,11 @@ export default function SwingResults({ swing, onSeek }: Props) {
     .filter((c) => c.n > 0);
 
   return (
-    <Collapsible asChild defaultOpen={!swing.feedback}>
-      <Card className="group gap-0 py-0">
-      <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl p-6 text-left">
-        <span>
+    <FoldCard
+      defaultOpen={!swing.feedback}
+      contentClassName="space-y-5"
+      header={
+        <>
           <h2 id="swing-h" className="text-base">
             Measurements
           </h2>
@@ -51,11 +50,9 @@ export default function SwingResults({ swing, onSeek }: Props) {
               ))}
             </span>
           )}
-        </span>
-        <ChevronDown className="size-5 text-muted-foregroundd-foreground transition-transform group-data-[state=open]:rotate-180" />
-      </CollapsibleTrigger>
-
-      <CollapsibleContent className="space-y-5 border-t p-6">
+        </>
+      }
+    >
         <p className="text-sm text-muted-foreground">
           Measured in 2D from the camera's point of view, so these are not true 3D joint angles. Distances are a
           share of your torso length, so camera distance does not matter.
@@ -132,8 +129,6 @@ export default function SwingResults({ swing, onSeek }: Props) {
             </ul>
           </div>
         ))}
-      </CollapsibleContent>
-      </Card>
-    </Collapsible>
+    </FoldCard>
   );
 }

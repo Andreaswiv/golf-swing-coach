@@ -16,11 +16,12 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .feedback import (
+from .limits import (
     HAND_PATH_INSIDE,
     HAND_PATH_OUTSIDE,
     HEAD_DROP,
     HEAD_LIFT,
+    HIP_SHIFT_IMPACT_MIN,
     KNEE_FLEX_RANGE,
     LEAD_ARM_BEND,
     ON_PLANE_MAX,
@@ -29,6 +30,7 @@ from .feedback import (
     REAR_HIP_TOWARD_BALL,
     SHAFT_INSIDE_TOES_CLEAR,
     SHAFT_OUTSIDE,
+    SHORT_OF_PARALLEL,
     SPINE_ADDRESS_RANGE,
     SPINE_LOSS,
     STANCE_RANGE,
@@ -81,7 +83,8 @@ def _shaft_points(toes: float | None) -> Rule:
     return rate
 
 
-def _rules(toes: float | None) -> dict[str, tuple[Rule, str]]:
+def rating_rules(toes: float | None) -> dict[str, tuple[Rule, str]]:
+    """Measurement name -> (rating function, what good swings show). The feedback rules use these too."""
     deg = "°"
     spine_lo, spine_hi = SPINE_ADDRESS_RANGE
     knee_lo, knee_hi = KNEE_FLEX_RANGE
@@ -105,8 +108,8 @@ def _rules(toes: float | None) -> dict[str, tuple[Rule, str]]:
         "hip_shift_top": (lambda v: _at_most(*SWAY)(-v), f"less than {SWAY[0]:.0f}% away from the target"),
         "head_shift_top": (lambda v: _at_most(*SWAY)(-v), f"less than {SWAY[0]:.0f}% away from the target"),
         "hip_shift_impact": (
-            lambda v: "good" if v >= 5 else ("watch" if v >= 0 else "bad"),
-            "at least 5% toward the target",
+            lambda v: "good" if v >= HIP_SHIFT_IMPACT_MIN else ("watch" if v >= 0 else "bad"),
+            f"at least {HIP_SHIFT_IMPACT_MIN:.0f}% toward the target",
         ),
         "lead_arm_bend_top": (_at_most(*LEAD_ARM_BEND), f"less than {LEAD_ARM_BEND[0]:.0f}{deg} of bend"),
         "stance_width_address": (
@@ -143,8 +146,8 @@ def _rules(toes: float | None) -> dict[str, tuple[Rule, str]]:
             "from 15% behind to 5% ahead of its address position (the head stays behind the ball)",
         ),
         "shaft_past_parallel_top": (
-            lambda v: "watch" if v > PAST_PARALLEL or v < -45 else "good",
-            f"from 45{deg} short of parallel to {PAST_PARALLEL:.0f}{deg} past",
+            lambda v: "watch" if v > PAST_PARALLEL or v < SHORT_OF_PARALLEL else "good",
+            f"from {-SHORT_OF_PARALLEL:.0f}{deg} short of parallel to {PAST_PARALLEL:.0f}{deg} past",
         ),
     }
 
@@ -162,7 +165,7 @@ def _spine_vs_address(address: float) -> tuple[Rule, str]:
 
 def rate_measurements(measurements: list[dict], club: dict | None = None) -> None:
     """Add ``rating`` and ``typical`` to each measurement dict, in place."""
-    rules = _rules((club or {}).get("toes_from_ball"))
+    rules = rating_rules((club or {}).get("toes_from_ball"))
     address = next((m for m in measurements if m["name"] == "spine_angle_address"), None)
     if address is not None:
         rules["spine_angle_top"] = rules["spine_angle_impact"] = _spine_vs_address(address["value"])

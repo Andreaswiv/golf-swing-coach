@@ -5,7 +5,7 @@ import type { Analysis, Rating, SwingMeasurement } from "@/api";
 import { reducedMotion, useCountUp } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { RATING } from "@/swingLabels";
+import { RATING, signed } from "@/swingLabels";
 import type { SwingPoint } from "@/swingStats";
 
 /*
@@ -66,13 +66,11 @@ function Typical({ m }: { m: SwingMeasurement | null }) {
 
 const RATING_STROKE: Record<Rating, string> = { good: "#3f9a3c", watch: "#d9a21b", bad: "#d2483a" };
 
-const signed = (v: number, digits = 0) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(digits)}`;
-
 /* ---- Tempo gauge ------------------------------------------------------------------------------- */
 
 const TEMPO_MAX = 5;
 
-/** Good tempo, as in the ratings: TEMPO_RANGE in cv-service/app/swing/feedback.py. */
+/** Good tempo, as in the ratings: TEMPO_RANGE in cv-service/app/swing/limits.py. */
 const TEMPO_GOOD = [2.3, 4.0] as const;
 
 function TempoGauge({ m }: { m: SwingMeasurement | null }) {

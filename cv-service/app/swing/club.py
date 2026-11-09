@@ -29,9 +29,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .measurements import Measurement
+from .measurements import HIPS, Measurement, target_side
 from .phases import NoSwingFound, Phases, torso_length
-from .series import Series, fill_gaps, weighted_point
+from .series import WRISTS, Series, fill_gaps, weighted_point
 
 MIN_CONF = 0.5
 MAX_GAP = 2  # frames of missing club detection bridged by interpolation
@@ -107,7 +107,7 @@ def build_club_series(payload: dict, s: Series) -> ClubSeries | None:
     def px(x, y):
         return (w - x * w if s.mirrored else x * w), y * h
 
-    wrists = weighted_point(s, ["left_wrist", "right_wrist"])
+    wrists = weighted_point(s, WRISTS)
     hands_ok = np.zeros(n, dtype=bool)
     head_boxes: list = [None] * n
     shaft_boxes: list = [None] * n
@@ -182,6 +182,12 @@ def build_club_series(payload: dict, s: Series) -> ClubSeries | None:
     )
 
 
+def _to_image(p: np.ndarray, s: Series) -> list[float]:
+    """A point in Series pixels as ORIGINAL normalised image coordinates (mirroring undone)."""
+    x = (s.width - p[0]) if s.mirrored else p[0]
+    return [round(float(x / s.width), 4), round(float(p[1] / s.height), 4)]
+
+
 def club_track(c: ClubSeries, s: Series) -> list:
     """Per frame, the club the analysis used, for drawing: [grip x, grip y, head x, head y, head found]
     in original normalised image coordinates (not mirrored), or None where there is no club."""
@@ -191,12 +197,7 @@ def club_track(c: ClubSeries, s: Series) -> list:
         if not c.checked[k] or np.isnan(g).any() or np.isnan(hd).any():
             out.append(None)
             continue
-
-        def norm(p):
-            x = (s.width - p[0]) if s.mirrored else p[0]
-            return [round(float(x / s.width), 4), round(float(p[1] / s.height), 4)]
-
-        out.append(norm(g) + norm(hd) + [1 if c.head_conf[k] > 0 else 0])
+        out.append(_to_image(g, s) + _to_image(hd, s) + [1 if c.head_conf[k] > 0 else 0])
     return out
 
 
@@ -245,7 +246,7 @@ def club_address(c: ClubSeries, s: Series, takeaway: int, torso: float) -> Addre
     none, because the over-the-top and inside-out verdicts are measured against it.
     """
     feet = weighted_point(s, ["left_ankle", "right_ankle", "left_foot_index", "right_foot_index"])
-    hips = weighted_point(s, ["left_hip", "right_hip"])
+    hips = weighted_point(s, HIPS)
     last = min(takeaway, len(c.checked) - 1)
     frames = []
     for k in range(last + 1):
@@ -345,7 +346,7 @@ def measure_club(c: ClubSeries, s: Series, phases: Phases, camera_angle: str) ->
                 )
 
     elif camera_angle == "face_on" and top is not None:
-        toward_target = 1.0 if (s.point("left_shoulder")[f("address"), 0] - s.point("right_shoulder")[f("address"), 0]) >= 0 else -1.0
+        toward_target = target_side(s, phases)
         lo, hi = phases.windows["top"]
         frames = list(range(lo, hi + 1))
         angles = []
@@ -433,9 +434,4 @@ def _hand_path_difference(grip: np.ndarray, plane: Plane, takeaway: int, top: in
 def _plane_for_display(plane: Plane, s: Series) -> dict:
     """Two points on the plane line in ORIGINAL normalised image coordinates (undo mirroring)."""
     far = plane.ball + plane.unit * 3.5 * plane.torso  # extend well past the grip
-
-    def norm(p):
-        x = (s.width - p[0]) if s.mirrored else p[0]
-        return [round(float(x / s.width), 4), round(float(p[1] / s.height), 4)]
-
-    return {"from": norm(plane.ball), "to": norm(far)}
+    return {"from": _to_image(plane.ball, s), "to": _to_image(far, s)}

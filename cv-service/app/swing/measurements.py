@@ -32,7 +32,7 @@ from typing import Callable
 import numpy as np
 
 from .phases import Phases
-from .series import Series, weighted_point
+from .series import WRISTS, Series, visibility_confidence, weighted_point
 
 SHOULDERS = ["left_shoulder", "right_shoulder"]
 HIPS = ["left_hip", "right_hip"]
@@ -68,15 +68,14 @@ class _Context:
         self.shoulder_mid = weighted_point(s, SHOULDERS)
         self.hip_mid = weighted_point(s, HIPS)
         self.head = weighted_point(s, HEAD)
-        self.hands = weighted_point(s, ["left_wrist", "right_wrist"])
+        self.hands = weighted_point(s, WRISTS)
 
     def window(self, phase: str) -> list[int]:
         lo, hi = self.p.windows.get(phase, (self.p.frame(phase), self.p.frame(phase)))
         return list(range(lo, hi + 1))
 
     def visibility_score(self, joints: list[str], frames: list[int]) -> float:
-        v = np.mean([self.s.visibility(j)[f] for j in joints for f in frames])
-        return float(np.clip((v - 0.3) / 0.5, 0.0, 1.0))
+        return visibility_confidence(np.mean([self.s.visibility(j)[f] for j in joints for f in frames]))
 
     def held_value(self, phase: str, fn: FrameFn) -> float:
         vals = np.array([fn(f) for f in self.window(phase)], dtype=float)
@@ -134,6 +133,14 @@ def _sign(value: float) -> float:
     return 1.0 if value >= 0 else -1.0
 
 
+def target_side(s: Series, phases: Phases) -> float:
+    """+1 when the target is toward +x in the image (face-on): the lead shoulder's side at address."""
+    lo, hi = phases.windows["address"]
+    gap = s.point("left_shoulder")[lo : hi + 1, 0] - s.point("right_shoulder")[lo : hi + 1, 0]
+    gap = gap[np.isfinite(gap)]
+    return _sign(float(np.median(gap)) if len(gap) else float("nan"))
+
+
 # Tempo in slow motion. The tempo ratio (backswing time / downswing time) does not change when the
 # whole swing is slowed evenly, so it is measured on slow-motion clips too; only the durations in
 # seconds are left out. What breaks it is a clip that changes speed DURING the swing (phone slow
@@ -155,7 +162,7 @@ SLOW_MOTION_TEMPO_CONFIDENCE = 0.85
 def _speed_jump_in_backswing(s: Series, phases: Phases) -> bool:
     f = phases.frame
     take, top = f("takeaway"), f("top")
-    hands = weighted_point(s, ["left_wrist", "right_wrist"]) / phases.torso_px
+    hands = weighted_point(s, WRISTS) / phases.torso_px
     # The middle of the backswing by where the hands are (15-85% of the way up), not by frame count:
     # in a clip that slows down halfway, most frames come from the slow part.
     rise = hands[take, 1] - hands[top, 1]
@@ -242,7 +249,7 @@ def measure(s: Series, phases: Phases, camera_angle: str) -> list[Measurement]:
             out.append(c.make(f"head_rise_{phase}", phase, head_height, "% torso", HEAD, relative_to_address=True))
 
     elif camera_angle == "face_on":
-        toward_target = _sign(c.held_value("address", lambda f: point("left_shoulder")[f, 0] - point("right_shoulder")[f, 0]))
+        toward_target = target_side(s, phases)
 
         def tilt(f):
             lead, trail = point("left_shoulder")[f], point("right_shoulder")[f]

@@ -3,12 +3,8 @@
 Every sentence is generated from a measurement with a fixed template, so the
 feedback can never claim something the numbers do not show.
 
-Thresholds are set so that what good players normally do is NOT a fault.
-Where a published source gives numbers (address posture, tempo, durations,
-face-on hip shift and shoulder tilt), the limits follow it; the rest are
-calibrated so a tour player's swing (tests/fixtures) comes out without
-"improve" findings. docs/RATING_SOURCES.md lists the source and evidence level
-for every limit. They are listed at the top so they are easy to review and tune.
+The limits are in limits.py. How clear a single-measurement fault is comes from
+the rating of that measurement (ratings.py), so the two can never disagree.
 
 Each finding gets a kind:
   * "strength": within the typical range, and the data is reliable (confidence >= 0.5).
@@ -21,32 +17,30 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-RELIABLE = 0.5
-AVERAGE_TORSO_CM = 50  # shoulder-centre to hip-centre for an average adult; only used to make % readable
+from .limits import (
+    HAND_PATH_INSIDE,
+    HAND_PATH_OUTSIDE,
+    HEAD_DROP,
+    HEAD_LIFT,
+    HIP_SHIFT_IMPACT_MIN,
+    KNEE_FLEX_RANGE,
+    LEAD_ARM_BEND,
+    ON_PLANE_MAX,
+    PAST_PARALLEL,
+    REAR_HIP_TOWARD_BALL,
+    RELIABLE,
+    SHAFT_INSIDE_TOES_CLEAR,
+    SHAFT_OUTSIDE,
+    SHORT_OF_PARALLEL,
+    SPINE_ADDRESS_RANGE,
+    SPINE_LOSS,
+    STANCE_RANGE,
+    SWAY,
+    TEMPO_RANGE,
+)
+from .ratings import rating_rules
 
-# Typical ranges (2D, degrees or % of torso length). (mild, clear) limits.
-# Sources per limit: docs/RATING_SOURCES.md.
-SPINE_ADDRESS_RANGE = (28.0, 48.0)  # pros 41.5 ± 2.9 (5-iron, Kim et al. 2018); tour ~29 with driver (GOLFTEC)
-KNEE_FLEX_RANGE = (12.0, 38.0)  # pros' trail knee 24.4 ± 5.5 (Kim et al. 2018): about mean ± 2 SD
-SPINE_LOSS = (12.0, 18.0)  # degrees more upright at impact than at address
-REAR_HIP_TOWARD_BALL = (15.0, 25.0)  # % torso (15% ~ 7.5 cm)
-HEAD_DROP = (20.0, 30.0)  # % torso lower than address (20% ~ 10 cm)
-HEAD_LIFT = (8.0, 15.0)  # % torso higher than address
-SWAY = (8.0, 15.0)  # % torso away from the target at the top
-LEAD_ARM_BEND = (20.0, 35.0)  # degrees of bend at the top
-STANCE_RANGE = (0.85, 1.6)  # ankle distance / shoulder width
-TEMPO_RANGE = (2.3, 4.0)  # backswing : downswing; pros 2.4-3.4, 10-25 handicaps 1.9-2.1 (Grober 2010)
-# Club (down-the-line). Shaft pointing beyond the ball halfway down (% torso; 40% ~ 20 cm).
-SHAFT_OUTSIDE = (40.0, 80.0)
-# Praise only up to here (% torso beyond the ball). Good downswings point between the toes and the
-# ball (tour swings measured -10 and -21); from here up to SHAFT_OUTSIDE there is no verdict.
-ON_PLANE_MAX = 15.0
-HAND_PATH_OUTSIDE = (10.0, 20.0)  # downswing hands outside the backswing path (% torso)
-# Downswing hands under the backswing path (% torso). Slightly inside is normal and good (a tour swing
-# measured 0); this is well past that.
-HAND_PATH_INSIDE = (12.0, 22.0)
-SHAFT_INSIDE_TOES_CLEAR = 40.0  # % torso the shaft points inside the toes before it is a clear fault
-PAST_PARALLEL = 15.0  # degrees past parallel at the top (face-on) before it counts as an overswing
+AVERAGE_TORSO_CM = 50  # shoulder-centre to hip-centre for an average adult; only used to make % readable
 
 
 @dataclass
@@ -77,15 +71,25 @@ def _issue_kind(clear: bool, confidence: float) -> str:
     return "improve" if clear and confidence >= RELIABLE else "watch"
 
 
+def _when(measurement: dict) -> str:
+    return "at impact" if measurement["name"].endswith("impact") else "at the top"
+
+
 class _Rules:
     def __init__(self, measurements: list[dict], club: dict | None = None) -> None:
         self.m = {x["name"]: x for x in measurements}
         self.club = club or {}
+        self.ratings = rating_rules(self.club.get("toes_from_ball"))
         self.out: list[Finding] = []
 
     def get(self, *names: str) -> list[dict] | None:
         found = [self.m.get(n) for n in names]
         return None if any(x is None for x in found) else found
+
+    def kind_of(self, measurement: dict) -> str:
+        """Finding kind for a fault judged from one measurement: "improve" when it rates as clearly off."""
+        rate, _ = self.ratings[measurement["name"]]
+        return _issue_kind(rate(measurement["value"]) == "bad", measurement["confidence"])
 
     def add(self, code, kind, title, detail, headline, used, why=None, drill=None):
         conf = min(x["confidence"] for x in used)
@@ -117,13 +121,19 @@ class _Rules:
         a, k = spine["value"], knee["value"]
         lo, hi = SPINE_ADDRESS_RANGE
         klo, khi = KNEE_FLEX_RANGE
+        spine_detail = (
+            f"Your upper body leans forward about {a:.0f}° from vertical. Most good setups are somewhere "
+            f"between {lo:.0f}° and {hi:.0f}°."
+        )
+        knee_detail = (
+            f"Your trail knee is flexed about {k:.0f}°. A relaxed, athletic setup usually has around "
+            f"{klo:.0f}° to {khi:.0f}°."
+        )
         ok = True
         if a < lo:
             ok = False
             self.add(
-                "upright_setup", _issue_kind(a < lo - 6, spine["confidence"]), "You stand quite upright at address",
-                f"Your upper body leans forward about {a:.0f}° from vertical. Most good setups are somewhere "
-                f"between {lo:.0f}° and {hi:.0f}°.",
+                "upright_setup", self.kind_of(spine), "You stand quite upright at address", spine_detail,
                 "you stand quite upright at address", [spine],
                 why="Standing tall leaves your arms little room to swing and makes it harder to turn your chest, "
                 "so the swing tends to get flat and arm-driven.",
@@ -133,9 +143,7 @@ class _Rules:
         elif a > hi:
             ok = False
             self.add(
-                "bent_over_setup", _issue_kind(a > hi + 6, spine["confidence"]), "You bend over a lot at address",
-                f"Your upper body leans forward about {a:.0f}° from vertical. Most good setups are somewhere "
-                f"between {lo:.0f}° and {hi:.0f}°.",
+                "bent_over_setup", self.kind_of(spine), "You bend over a lot at address", spine_detail,
                 "you bend over a lot at address", [spine],
                 why="A lot of forward bend makes it hard to keep your posture during the swing; many golfers stand "
                 "up through impact to make room.",
@@ -145,9 +153,7 @@ class _Rules:
         if k < klo:
             ok = False
             self.add(
-                "straight_legs", _issue_kind(k < klo - 6, knee["confidence"]), "Your legs are quite straight at address",
-                f"Your trail knee is flexed about {k:.0f}°. A relaxed, athletic setup usually has around "
-                f"{klo:.0f}° to {khi:.0f}°.",
+                "straight_legs", self.kind_of(knee), "Your legs are quite straight at address", knee_detail,
                 "your legs are quite straight at address", [knee],
                 why="Straight legs make it hard to turn your hips and keep your balance.",
                 drill="Flex your knees just enough that you could jump straight up from your setup.",
@@ -155,9 +161,7 @@ class _Rules:
         elif k > khi:
             ok = False
             self.add(
-                "squatting", _issue_kind(k > khi + 8, knee["confidence"]), "You sit down a lot at address",
-                f"Your trail knee is flexed about {k:.0f}°. A relaxed, athletic setup usually has around "
-                f"{klo:.0f}° to {khi:.0f}°.",
+                "squatting", self.kind_of(knee), "You sit down a lot at address", knee_detail,
                 "you sit down a lot at address", [knee],
                 why="Too much knee bend lowers you toward the ball and often leads to standing up in the downswing.",
                 drill="Straighten your legs a little and get your forward lean from hinging at the hips instead.",
@@ -215,9 +219,9 @@ class _Rules:
         lifted = max(found, key=lambda x: x["value"]) if max(top["value"], imp["value"]) > HEAD_LIFT[0] else None
         if worst:
             v = -worst["value"]
-            when = "at impact" if worst["name"].endswith("impact") else "at the top"
+            when = _when(worst)
             self.add(
-                "head_drop", _issue_kind(v > HEAD_DROP[1], worst["confidence"]), "Your head drops during the swing",
+                "head_drop", self.kind_of(worst), "Your head drops during the swing",
                 f"Your head is lower {when} than at address by {_cm(v)}. Good players' heads drop a little too, "
                 "but this much usually means your whole upper body is moving down.",
                 f"your head drops {when}", [worst],
@@ -228,9 +232,9 @@ class _Rules:
             )
         elif lifted:
             v = lifted["value"]
-            when = "at impact" if lifted["name"].endswith("impact") else "at the top"
+            when = _when(lifted)
             self.add(
-                "head_lift", _issue_kind(v > HEAD_LIFT[1], lifted["confidence"]), "Your head rises during the swing",
+                "head_lift", self.kind_of(lifted), "Your head rises during the swing",
                 f"Your head is higher {when} than at address by {_cm(v)}.",
                 f"your head rises {when}", [lifted],
                 why="Rising during the swing raises the low point of the club and often causes thin or topped shots.",
@@ -262,7 +266,7 @@ class _Rules:
             used = [hip] if -hip["value"] >= -head["value"] else [head]
             part = "hips" if used[0] is hip else "head"
             self.add(
-                "sway", _issue_kind(away > SWAY[1], used[0]["confidence"]), "You sway away from the target",
+                "sway", self.kind_of(used[0]), "You sway away from the target",
                 f"At the top of the backswing your {part} has moved away from the target by {_cm(away)}. "
                 "Ideally you turn around a fairly steady centre instead of sliding.",
                 "you sway away from the target in the backswing", used,
@@ -285,9 +289,9 @@ class _Rules:
             return
         (hip,) = found
         v = hip["value"]
-        if v < 5:
+        if v < HIP_SHIFT_IMPACT_MIN:
             self.add(
-                "hanging_back", _issue_kind(v < 0, hip["confidence"]), "Your hips stay back at impact",
+                "hanging_back", self.kind_of(hip), "Your hips stay back at impact",
                 f"At impact your hip centre is {'behind' if v < 0 else 'only slightly ahead of'} where it was at "
                 f"address ({_cm(v)}). Good players' hips are usually clearly toward the target by impact.",
                 "your hips stay back at impact", [hip],
@@ -311,7 +315,7 @@ class _Rules:
         v = arm["value"]
         if v > LEAD_ARM_BEND[0]:
             self.add(
-                "bent_lead_arm", _issue_kind(v > LEAD_ARM_BEND[1], arm["confidence"]), "Your lead arm bends at the top",
+                "bent_lead_arm", self.kind_of(arm), "Your lead arm bends at the top",
                 f"Your lead arm is bent about {v:.0f}° at the top of the backswing. A small bend is normal.",
                 "your lead arm bends at the top", [arm],
                 why="A collapsing lead arm shortens the swing radius and adds a variable you have to time back "
@@ -442,7 +446,7 @@ class _Rules:
                 drill="Make swings where you stop when the shaft is parallel to the ground, keeping your lead "
                 "arm extended; a three-quarter feel is usually closer to parallel than you think.",
             )
-        elif v > -45:
+        elif v > SHORT_OF_PARALLEL:
             self.add(
                 "controlled_length", "strength", "Controlled backswing length",
                 f"At the top, the shaft is {'about parallel to' if abs(v) < 8 else ('about %.0f° short of' % -v if v < 0 else 'about %.0f° past' % v)} "
@@ -458,20 +462,17 @@ class _Rules:
         (t,) = found
         v = t["value"]
         lo, hi = TEMPO_RANGE
+        detail = f"Your backswing takes about {v:.1f} times as long as your downswing. Most good swings are around 3 to 1."
         if v < lo:
             self.add(
-                "quick_backswing", "watch", "Your backswing is quick",
-                f"Your backswing takes about {v:.1f} times as long as your downswing. Most good swings are "
-                "around 3 to 1.",
+                "quick_backswing", "watch", "Your backswing is quick", detail,
                 "your backswing is quick compared with your downswing", [t],
                 why="A rushed backswing often leads to a rushed transition and poor sequencing.",
                 drill="Swing to a count: 'one-two-three' going back, 'four' coming down. A metronome app works too.",
             )
         elif v > hi:
             self.add(
-                "slow_backswing", "watch", "Your backswing is slow",
-                f"Your backswing takes about {v:.1f} times as long as your downswing. Most good swings are "
-                "around 3 to 1.",
+                "slow_backswing", "watch", "Your backswing is slow", detail,
                 "your backswing is slow compared with your downswing", [t],
                 why="A very slow backswing or a long pause at the top can make the transition jerky.",
                 drill="Swing to a steady count: 'one-two-three' back, 'four' down, without stopping at the top.",

@@ -18,7 +18,7 @@ from typing import Callable
 
 from . import PIPELINE_VERSION
 from .config import Settings
-from .pipeline import run_pipeline
+from .pipeline import KEYPOINTS_FORMAT, run_pipeline
 from .pose.base import PoseEstimator
 from .schemas import JobRequest, JobState
 from .club.detector import ClubDetector
@@ -112,7 +112,7 @@ class JobManager:
                 "keypoints": {
                     "path": request.keypoints_path,
                     "frame_count": output.frame_count,
-                    "data_format": "golfcoach.keypoints.v1",
+                    "data_format": KEYPOINTS_FORMAT,
                 },
                 "quality": output.quality.to_dict(),
                 "swing": output.swing,

@@ -91,6 +91,24 @@ public class SwingResultMapperTests
     }
 
     [Fact]
+    public void Summary_dto_leaves_out_per_frame_data_only()
+    {
+        var analysis = NewAnalysis();
+        analysis.SwingJson = """
+        {"status": "ok", "phases": [], "rejected_landmarks": {"left_wrist": [3]},
+         "club": {"tracked": true, "track": [[0.1, 0.2, 0.3, 0.4, 1]], "plane": null}}
+        """;
+
+        var swing = DtoMapper.ToSummaryDto(analysis).Swing!.Value;
+
+        Assert.Equal("ok", swing.GetProperty("status").GetString());
+        Assert.False(swing.TryGetProperty("rejected_landmarks", out _));
+        var club = swing.GetProperty("club");
+        Assert.True(club.GetProperty("tracked").GetBoolean());
+        Assert.False(club.TryGetProperty("track", out _));
+    }
+
+    [Fact]
     public void Cv_result_without_swing_still_parses()
     {
         const string json = """{"pipeline_version":"0.2.0","pose_model":"m","video":{"width":1,"height":1,"fps":30,"declared_frame_count":1,"duration_seconds":1,"orientation":"portrait","rotation_degrees":0,"codec":"avc1"},"keypoints":{"path":"k","frame_count":1,"data_format":"f"},"quality":{}}""";

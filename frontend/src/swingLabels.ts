@@ -106,15 +106,15 @@ export function measurementInfo(name: string): MeasurementInfo {
   return INFO[name] ?? { label: name.replace(/_/g, " "), meaning: "" };
 }
 
+/** A number with an explicit + or − in front (0 has no sign). */
+export const signed = (v: number, digits = 0) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(digits)}`;
+
 export function formatMeasurement(m: SwingMeasurement): string {
-  const sign = (v: number) => (v > 0 ? "+" : v < 0 ? "−" : "");
   switch (m.unit) {
     case "deg":
-      return m.name.includes("change") || m.name.includes("past_parallel")
-        ? `${sign(m.value)}${Math.abs(m.value).toFixed(1)}°`
-        : `${m.value.toFixed(1)}°`;
+      return m.name.includes("change") || m.name.includes("past_parallel") ? `${signed(m.value, 1)}°` : `${m.value.toFixed(1)}°`;
     case "% torso":
-      return `${sign(m.value)}${Math.abs(m.value).toFixed(1)}% of torso`;
+      return `${signed(m.value, 1)}% of torso`;
     case "s":
       return `${m.value.toFixed(2)} s`;
     case "ratio":
@@ -124,13 +124,20 @@ export function formatMeasurement(m: SwingMeasurement): string {
   }
 }
 
-export const RATING: Record<Rating, { text: string; value: string; pill: string; dot: string }> = {
-  good: { text: "Good", value: "text-good", pill: "bg-good-soft text-good", dot: "bg-good" },
-  watch: { text: "Slightly off", value: "text-warn", pill: "bg-warn-soft text-warn", dot: "bg-warn" },
-  bad: { text: "Clearly off", value: "text-bad", pill: "bg-bad-soft text-bad", dot: "bg-bad" },
+export type Tone = "good" | "warn" | "bad" | "neutral";
+
+export const TONE_CLASS: Record<Tone, string> = {
+  good: "bg-good-soft text-good",
+  warn: "bg-warn-soft text-warn",
+  bad: "bg-bad-soft text-bad",
+  neutral: "bg-subtle text-mute",
 };
 
-export type Tone = "good" | "warn" | "bad" | "neutral";
+export const RATING: Record<Rating, { text: string; value: string; pill: string; dot: string }> = {
+  good: { text: "Good", value: "text-good", pill: TONE_CLASS.good, dot: "bg-good" },
+  watch: { text: "Slightly off", value: "text-warn", pill: TONE_CLASS.warn, dot: "bg-warn" },
+  bad: { text: "Clearly off", value: "text-bad", pill: TONE_CLASS.bad, dot: "bg-bad" },
+};
 
 /** One-line verdict for a swing, from the counts of finding kinds. */
 export function verdict(feedback: SwingFeedback | null | undefined): { title: string; tone: Tone } | null {
@@ -143,13 +150,6 @@ export function verdict(feedback: SwingFeedback | null | undefined): { title: st
   if (feedback.findings.length > 0) return { title: "Looking good", tone: "good" };
   return { title: "Not enough reliable data", tone: "neutral" };
 }
-
-export const TONE_CLASS: Record<Tone, string> = {
-  good: "bg-good-soft text-good",
-  warn: "bg-warn-soft text-warn",
-  bad: "bg-bad-soft text-bad",
-  neutral: "bg-subtle text-mute",
-};
 
 /** "Down-the-line swing" plus a readable date, instead of the uploaded file name. */
 export function swingTitle(a: Analysis): { title: string; date: string } {
