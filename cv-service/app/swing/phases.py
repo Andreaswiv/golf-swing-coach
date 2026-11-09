@@ -33,7 +33,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..quality import temporal_resolution_factor
-from .series import Series, weighted_point
+from .series import WRISTS, Series, median_torso_length, visibility_confidence, weighted_point
 
 MIN_SWING_RANGE = 0.5  # hands must rise at least half a torso length between impact and top
 ADDRESS_RADIUS = 0.08  # torso lengths: hands within this of the address position count as "at address"
@@ -82,20 +82,17 @@ class Phases:
 
 
 def torso_length(s: Series) -> float:
-    shoulders = (s.point("left_shoulder") + s.point("right_shoulder")) / 2
-    hips = (s.point("left_hip") + s.point("right_hip")) / 2
-    lengths = np.linalg.norm(shoulders - hips, axis=1)
-    lengths = lengths[~np.isnan(lengths)]
-    if len(lengths) == 0 or np.median(lengths) <= 1:
+    torso = median_torso_length(s.xy)
+    if torso is None:
         raise NoSwingFound("The golfer's shoulders and hips were not found reliably enough to analyse the swing.")
-    return float(np.median(lengths))
+    return torso
 
 
 def hand_visibility_score(s: Series, frame: int) -> float:
     """0..1 from the better-visible wrist, averaged over the frame and its neighbours."""
     lo, hi = max(frame - 1, 0), min(frame + 2, s.frame_count)
     best = np.maximum(s.visibility("left_wrist")[lo:hi], s.visibility("right_wrist")[lo:hi])
-    return float(np.clip((best.mean() - 0.3) / 0.5, 0.0, 1.0))
+    return visibility_confidence(best.mean())
 
 
 def _anchor_candidates(vy: np.ndarray) -> list[int]:
@@ -140,7 +137,7 @@ def detect_phases(s: Series) -> Phases:
         raise NoSwingFound("The clip is too short to contain a swing.")
 
     torso = torso_length(s)
-    hands = weighted_point(s, ["left_wrist", "right_wrist"])
+    hands = weighted_point(s, WRISTS)
     known = ~np.isnan(hands[:, 0])
     if known.mean() < 0.5:
         raise NoSwingFound("The hands were not found in most frames.")

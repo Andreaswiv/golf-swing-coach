@@ -98,7 +98,7 @@ public static class AnalysisEndpoints
     private static async Task<IResult> List(AppDbContext db, CancellationToken ct)
     {
         var items = await WithDetails(db).AsNoTracking().OrderByDescending(a => a.CreatedAt).ToListAsync(ct);
-        return Results.Ok(items.Select(DtoMapper.ToDto));
+        return Results.Ok(items.Select(DtoMapper.ToSummaryDto));
     }
 
     private static async Task<IResult> Get(Guid id, AppDbContext db, CancellationToken ct)

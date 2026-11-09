@@ -171,17 +171,21 @@ def _detect_club(
     try:
         index = 0
         while index <= last:
+            if index < first:  # advance without decoding the picture
+                if not cap.grab():
+                    break
+                index += 1
+                continue
             ok, frame = cap.read()
             if not ok or frame is None:
                 break
-            if index >= first:
-                small = _downscale(frame, max_process_dim)
-                # Normalised [x1, y1, x2, y2, conf]; an absent part = checked but not found.
-                frames[index]["club"] = {part: box.to_list() for part, box in detector.detect(small).items()}
-                done = index - first + 1
-                if done % 5 == 0:
-                    share = done / (last - first + 1)
-                    progress(CLUB_PASS_START_PCT + int((94 - CLUB_PASS_START_PCT) * share), stage)
+            small = _downscale(frame, max_process_dim)
+            # Normalised [x1, y1, x2, y2, conf]; an absent part = checked but not found.
+            frames[index]["club"] = {part: box.to_list() for part, box in detector.detect(small).items()}
+            done = index - first + 1
+            if done % 5 == 0:
+                share = done / (last - first + 1)
+                progress(CLUB_PASS_START_PCT + int((94 - CLUB_PASS_START_PCT) * share), stage)
             index += 1
     finally:
         cap.release()

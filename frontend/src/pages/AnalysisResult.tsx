@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, ChevronDown, ChevronLeft, Download, RefreshCw, Trash2 } from "lucide-react";
+import { AlertCircle, ChevronLeft, Download, RefreshCw, Trash2 } from "lucide-react";
 import { api, formatDuration, type Analysis } from "@/api";
 import ClubTrackingView from "@/components/ClubTrackingView";
 import ConfirmDelete from "@/components/ConfirmDelete";
+import FoldCard from "@/components/FoldCard";
 import QualityReportView from "@/components/QualityReportView";
 import SwingFeedbackView from "@/components/SwingFeedbackView";
 import SwingPlayer, { type SwingPlayerHandle } from "@/components/SwingPlayer";
@@ -11,25 +12,15 @@ import SwingResults from "@/components/SwingResults";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { swingTitle, verdict } from "@/swingLabels";
 
-/** A card that folds open: title and one-line description, content below a divider. */
-function FoldCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+function foldHeader(title: string, description: string) {
   return (
-    <Collapsible asChild>
-      <Card className="group gap-0 py-0">
-        <CollapsibleTrigger className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl p-6 text-left">
-          <span>
-            <span className="block font-semibold">{title}</span>
-            <span className="text-sm text-muted-foreground">{description}</span>
-          </span>
-          <ChevronDown className="size-5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-        </CollapsibleTrigger>
-        <CollapsibleContent className="border-t p-6">{children}</CollapsibleContent>
-      </Card>
-    </Collapsible>
+    <>
+      <span className="block font-semibold">{title}</span>
+      <span className="text-sm text-muted-foreground">{description}</span>
+    </>
   );
 }
 
@@ -267,12 +258,12 @@ export default function AnalysisResult() {
           {analysis.swing && analysis.swing.status === "ok" && <SwingResults swing={analysis.swing} onSeek={seek} />}
 
           {analysis.quality && (
-            <FoldCard title="Video quality" description="How well the video could be analysed">
+            <FoldCard header={foldHeader("Video quality", "How well the video could be analysed")}>
               <QualityReportView quality={analysis.quality} />
             </FoldCard>
           )}
 
-          <FoldCard title="Technical details" description="File, format and analysis versions">
+          <FoldCard header={foldHeader("Technical details", "File, format and analysis versions")}>
             <dl className="divide-y text-sm">
               {[
                 ["File", v.originalFileName],

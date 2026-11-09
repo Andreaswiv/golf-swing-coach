@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type Ref,
+  type RefObject,
+} from "react";
 import { ChevronLeft, ChevronRight, Maximize, Minimize, Pause, Play } from "lucide-react";
 import type { ClubSummary, ClubTrackPoint, SwingPhase } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -36,6 +46,31 @@ const CLUB_COLOR = "#5ee38a";
 const PLANE_COLOR = "#ff5a7a";
 
 type Plane = NonNullable<ClubSummary["plane"]>;
+
+/**
+ * Which frame is on screen. It changes with every video frame, so it lives outside React state:
+ * only the few small components that show it re-render, not the whole player.
+ */
+function createPositionStore() {
+  let value = { frameIndex: 0, seconds: 0 };
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set(frameIndex: number, seconds: number) {
+      if (frameIndex === value.frameIndex && seconds === value.seconds) return;
+      value = { frameIndex, seconds };
+      listeners.forEach((listener) => listener());
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+}
+type PositionStore = ReturnType<typeof createPositionStore>;
+
+const useFrameIndex = (position: PositionStore) => useSyncExternalStore(position.subscribe, () => position.get().frameIndex);
+const useShownSeconds = (position: PositionStore) => useSyncExternalStore(position.subscribe, () => position.get().seconds);
 
 export interface SwingPlayerHandle {
   /** Pause and show the given frame. */
@@ -80,13 +115,11 @@ export default function SwingPlayer({
   useEffect(() => localStorage.setItem(HIDE_UNCERTAIN_KEY, String(hideUncertain)), [hideUncertain]);
   const [showClub, setShowClub] = useState(true);
   const [showPlane, setShowPlane] = useState(true);
-  const [frameIndex, setFrameIndex] = useState(0);
+  const [position] = useState(createPositionStore);
   // Our own controls (the browser's add a fullscreen button that drops the overlay, and Safari's
-  // cannot be hidden). shownSeconds follows the frame on screen; scrubTo is set while dragging.
+  // cannot be hidden).
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [shownSeconds, setShownSeconds] = useState(0);
-  const [scrubTo, setScrubTo] = useState<number | null>(null);
   const [aspectMismatch, setAspectMismatch] = useState(false);
 
   useEffect(() => {
@@ -126,10 +159,9 @@ export default function SwingPlayer({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
 
-    if (!keypoints || keypoints.frames.length === 0) return setShownSeconds(time);
+    if (!keypoints || keypoints.frames.length === 0) return position.set(position.get().frameIndex, time);
     const index = frameIndexAt(keypoints.frames, time);
-    setFrameIndex(index);
-    setShownSeconds(time);
+    position.set(index, time);
     if (!video.videoWidth) return;
 
     // The video is letterboxed inside its element (object-fit: contain).
@@ -148,7 +180,7 @@ export default function SwingPlayer({
     if (showSkeleton) drawSkeleton(ctx, frame, ox, oy, w, h, hideUncertain, rejected.get(index));
     if (showClub) drawClub(ctx, clubLineAt(frame, index, clubTrack, w / h), ox, oy, w, h);
     ctx.restore();
-  }, []);
+  }, [position]);
 
   // Media time of the frame actually on screen. While scrubbing, currentTime jumps ahead of the
   // picture (the browser may not have decoded the new frame yet, or skips it), so the overlay is
@@ -327,9 +359,7 @@ export default function SwingPlayer({
   );
 
   const frames = keypoints?.frames ?? [];
-  const current: KeypointFrame | undefined = frames[frameIndex];
   const clipEnd = frames.length ? frames[frames.length - 1].t : 0;
-  const currentPhase = [...phases].reverse().find((p) => p.frame_index <= frameIndex);
   const aspect = keypoints ? keypoints.video.width / keypoints.video.height : 1;
   const clubTracked = useMemo(() => (keypoints ? hasClubData(keypoints) : false), [keypoints]);
 
@@ -382,23 +412,7 @@ export default function SwingPlayer({
           >
             {playing ? <Pause className="size-5" /> : <Play className="size-5 fill-current" />}
           </Button>
-          <span className="tnum shrink-0 font-mono text-[11px] text-white/80">
-            {(scrubTo ?? shownSeconds).toFixed(2)} / {duration.toFixed(2)} s
-          </span>
-          <Slider
-            min={0}
-            max={duration || 1}
-            step={0.001}
-            value={[Math.min(scrubTo ?? shownSeconds, duration || 0)]}
-            aria-label="Position in the video"
-            onValueChange={([t]) => {
-              setScrubTo(t);
-              if (videoRef.current) videoRef.current.currentTime = t;
-            }}
-            onValueCommit={() => setScrubTo(null)}
-            onBlur={() => setScrubTo(null)}
-            className="min-w-0 flex-1 cursor-pointer [&_[data-slot=slider-range]]:bg-white [&_[data-slot=slider-thumb]]:size-3.5 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-track]]:bg-white/25"
-          />
+          <Scrubber position={position} duration={duration} videoRef={videoRef} />
           <Button
             variant="ghost"
             size="icon-sm"
@@ -414,46 +428,7 @@ export default function SwingPlayer({
 
       <Card className="gap-4 p-5">
         {phases.length > 0 && clipEnd > 0 && (
-          <div aria-label="Swing phases">
-            <div className="relative mx-2 h-1.5 rounded-full bg-muted">
-              <div
-                className="absolute inset-y-0 left-0 rounded-full bg-leaf-2"
-                style={{ width: `${Math.min(100, ((current?.t ?? 0) / clipEnd) * 100)}%` }}
-              />
-              {phases.map((p) => (
-                <span
-                  key={p.name}
-                  className={cn(
-                    "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card",
-                    currentPhase?.name === p.name ? "bg-leaf-4" : "bg-muted-foreground/40",
-                  )}
-                  style={{ left: `${(p.timestamp_s / clipEnd) * 100}%` }}
-                />
-              ))}
-            </div>
-            <div className="mt-3 grid grid-cols-5 gap-1.5">
-              {phases.map((p) => {
-                const active = currentPhase?.name === p.name;
-                return (
-                  <button
-                    key={p.name}
-                    onClick={() => seekToFrame(p.frame_index)}
-                    title={PHASE_HINT[p.name]}
-                    aria-pressed={active}
-                    className={cn(
-                      "rounded-lg px-1 py-1.5 text-center text-xs transition-colors sm:text-sm",
-                      active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <span className="block font-semibold">{PHASE_LABEL[p.name]}</span>
-                    <span className={cn("tnum block text-[0.7rem]", active ? "text-primary-foreground/70" : "text-muted-foreground")}>
-                      {p.timestamp_s.toFixed(2)} s{p.confidence < 0.5 ? " ?" : ""}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <PhaseTimeline position={position} phases={phases} frames={frames} clipEnd={clipEnd} onSeek={seekToFrame} />
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -462,9 +437,7 @@ export default function SwingPlayer({
               <Button variant="ghost" size="icon-sm" onClick={() => stepFrames(-1)} aria-label="Previous frame">
                 <ChevronLeft className="size-5" />
               </Button>
-              <span className="tnum min-w-[6.5rem] text-center text-xs text-muted-foreground">
-                Frame {current ? current.i + 1 : "–"} / {frames.length}
-              </span>
+              <FrameCounter position={position} frames={frames} />
               <Button variant="ghost" size="icon-sm" onClick={() => stepFrames(1)} aria-label="Next frame">
                 <ChevronRight className="size-5" />
               </Button>
@@ -508,16 +481,13 @@ export default function SwingPlayer({
             </span>
           </div>
         )}
-        {current && clubTracked && showClub && !clubLineAt(current, frameIndex, clubTrack, aspect) && (
-          <p className="text-sm text-muted-foreground">
-            {current.club ? "The club was not found in this frame." : "The club is only tracked around the swing."}
-          </p>
-        )}
-
-        {current && !current.lm && <p className="text-sm text-destructive">No person was detected in this frame.</p>}
-        {current && current.lm && current.n > 1 && (
-          <p className="text-sm text-warn">{current.n} people detected here; showing the one chosen as the golfer.</p>
-        )}
+        <FrameNotes
+          position={position}
+          frames={frames}
+          showClubNote={clubTracked && showClub}
+          clubTrack={clubTrack}
+          aspect={aspect}
+        />
         {aspectMismatch && (
           <p role="alert" className="text-sm text-destructive">
             The browser shows this video in a different orientation than the one analysed, so the skeleton may not
@@ -531,6 +501,141 @@ export default function SwingPlayer({
         )}
       </Card>
     </div>
+  );
+}
+
+/** The time readout and the position slider. `scrubTo` is set while the slider is being dragged. */
+function Scrubber({
+  position,
+  duration,
+  videoRef,
+}: {
+  position: PositionStore;
+  duration: number;
+  videoRef: RefObject<HTMLVideoElement | null>;
+}) {
+  const shownSeconds = useShownSeconds(position);
+  const [scrubTo, setScrubTo] = useState<number | null>(null);
+  return (
+    <>
+      <span className="tnum shrink-0 font-mono text-[11px] text-white/80">
+        {(scrubTo ?? shownSeconds).toFixed(2)} / {duration.toFixed(2)} s
+      </span>
+      <Slider
+        min={0}
+        max={duration || 1}
+        step={0.001}
+        value={[Math.min(scrubTo ?? shownSeconds, duration || 0)]}
+        aria-label="Position in the video"
+        onValueChange={([t]) => {
+          setScrubTo(t);
+          if (videoRef.current) videoRef.current.currentTime = t;
+        }}
+        onValueCommit={() => setScrubTo(null)}
+        onBlur={() => setScrubTo(null)}
+        className="min-w-0 flex-1 cursor-pointer [&_[data-slot=slider-range]]:bg-white [&_[data-slot=slider-thumb]]:size-3.5 [&_[data-slot=slider-thumb]]:border-white [&_[data-slot=slider-track]]:bg-white/25"
+      />
+    </>
+  );
+}
+
+function PhaseTimeline({
+  position,
+  phases,
+  frames,
+  clipEnd,
+  onSeek,
+}: {
+  position: PositionStore;
+  phases: SwingPhase[];
+  frames: KeypointFrame[];
+  clipEnd: number;
+  onSeek: (frameIndex: number) => void;
+}) {
+  const frameIndex = useFrameIndex(position);
+  const currentPhase = [...phases].reverse().find((p) => p.frame_index <= frameIndex);
+  return (
+    <div aria-label="Swing phases">
+      <div className="relative mx-2 h-1.5 rounded-full bg-muted">
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-leaf-2"
+          style={{ width: `${Math.min(100, ((frames[frameIndex]?.t ?? 0) / clipEnd) * 100)}%` }}
+        />
+        {phases.map((p) => (
+          <span
+            key={p.name}
+            className={cn(
+              "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card",
+              currentPhase?.name === p.name ? "bg-leaf-4" : "bg-muted-foreground/40",
+            )}
+            style={{ left: `${(p.timestamp_s / clipEnd) * 100}%` }}
+          />
+        ))}
+      </div>
+      <div className="mt-3 grid grid-cols-5 gap-1.5">
+        {phases.map((p) => {
+          const active = currentPhase?.name === p.name;
+          return (
+            <button
+              key={p.name}
+              onClick={() => onSeek(p.frame_index)}
+              title={PHASE_HINT[p.name]}
+              aria-pressed={active}
+              className={cn(
+                "rounded-lg px-1 py-1.5 text-center text-xs transition-colors sm:text-sm",
+                active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <span className="block font-semibold">{PHASE_LABEL[p.name]}</span>
+              <span className={cn("tnum block text-[0.7rem]", active ? "text-primary-foreground/70" : "text-muted-foreground")}>
+                {p.timestamp_s.toFixed(2)} s{p.confidence < 0.5 ? " ?" : ""}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FrameCounter({ position, frames }: { position: PositionStore; frames: KeypointFrame[] }) {
+  const current = frames[useFrameIndex(position)];
+  return (
+    <span className="tnum min-w-[6.5rem] text-center text-xs text-muted-foreground">
+      Frame {current ? current.i + 1 : "–"} / {frames.length}
+    </span>
+  );
+}
+
+/** What is special about the frame on screen: no club, no person, or several people. */
+function FrameNotes({
+  position,
+  frames,
+  showClubNote,
+  clubTrack,
+  aspect,
+}: {
+  position: PositionStore;
+  frames: KeypointFrame[];
+  showClubNote: boolean;
+  clubTrack?: (ClubTrackPoint | null)[];
+  aspect: number;
+}) {
+  const frameIndex = useFrameIndex(position);
+  const current = frames[frameIndex];
+  if (!current) return null;
+  return (
+    <>
+      {showClubNote && !clubLineAt(current, frameIndex, clubTrack, aspect) && (
+        <p className="text-sm text-muted-foreground">
+          {current.club ? "The club was not found in this frame." : "The club is only tracked around the swing."}
+        </p>
+      )}
+      {!current.lm && <p className="text-sm text-destructive">No person was detected in this frame.</p>}
+      {current.lm && current.n > 1 && (
+        <p className="text-sm text-warn">{current.n} people detected here; showing the one chosen as the golfer.</p>
+      )}
+    </>
   );
 }
 
@@ -659,16 +764,7 @@ function drawSkeleton(
     if (!sure && hideUncertain) continue;
     ctx.globalAlpha = sure ? 1 : 0.4;
     ctx.setLineDash(sure ? [] : [lineWidth * 1.5, lineWidth * 2]);
-    // Dark underlay keeps the lines readable on bright backgrounds.
-    ctx.strokeStyle = "rgba(0,0,0,0.55)";
-    ctx.lineWidth = lineWidth + 2;
-    ctx.beginPath();
-    ctx.moveTo(px(a), py(a));
-    ctx.lineTo(px(b), py(b));
-    ctx.stroke();
-    ctx.strokeStyle = COLORS[side];
-    ctx.lineWidth = lineWidth;
-    ctx.stroke();
+    strokeLine(ctx, px(a), py(a), px(b), py(b), COLORS[side], lineWidth);
   }
   ctx.setLineDash([]);
 

@@ -1,6 +1,6 @@
 # Where the rating limits come from
 
-The limits live in `cv-service/app/swing/feedback.py` (shared ranges) and
+The limits live in `cv-service/app/swing/limits.py` (shared ranges) and
 `cv-service/app/swing/ratings.py` (ranges used only for ratings). This file lists, per
 measurement, what each limit is based on and how strong that basis is.
 

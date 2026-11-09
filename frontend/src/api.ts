@@ -158,27 +158,27 @@ export class ApiError extends Error {
   }
 }
 
-async function readError(res: Response): Promise<string> {
-  try {
-    const body = await res.json();
-    return body.detail ?? body.title ?? body.error ?? `Request failed (${res.status})`;
-  } catch {
-    return `Request failed (${res.status})`;
-  }
+type ErrorBody = { detail?: string; title?: string; error?: string } | null;
+
+const errorMessage = (body: ErrorBody, fallback: string) => body?.detail ?? body?.title ?? body?.error ?? fallback;
+
+async function ensureOk(res: Response): Promise<Response> {
+  if (res.ok) return res;
+  const body = (await res.json().catch(() => null)) as ErrorBody;
+  throw new ApiError(errorMessage(body, `Request failed (${res.status})`), res.status);
 }
 
 async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new ApiError(await readError(res), res.status);
-  return (await res.json()) as T;
+  return (await (await ensureOk(res)).json()) as T;
 }
 
 export const api = {
   health: () => fetch("/api/health").then(json<HealthReport>),
+  /** Summaries: `swing.club.track` and `swing.rejected_landmarks` are left out; `get` has them. */
   list: () => fetch("/api/analyses").then(json<Analysis[]>),
   get: (id: string) => fetch(`/api/analyses/${id}`).then(json<Analysis>),
   async remove(id: string) {
-    const res = await fetch(`/api/analyses/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new ApiError(await readError(res), res.status);
+    await ensureOk(await fetch(`/api/analyses/${id}`, { method: "DELETE" }));
   },
   reanalyze: (id: string) => fetch(`/api/analyses/${id}/reanalyze`, { method: "POST" }).then(json<Analysis>),
   videoUrl: (id: string) => `/api/analyses/${id}/video`,
@@ -203,8 +203,7 @@ export const api = {
       xhr.onerror = () => reject(new ApiError("Could not reach the server. Is the API running?", 0));
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) return resolve(xhr.response as Analysis);
-        const body = xhr.response as { detail?: string; title?: string } | null;
-        reject(new ApiError(body?.detail ?? body?.title ?? `Upload failed (${xhr.status})`, xhr.status));
+        reject(new ApiError(errorMessage(xhr.response as ErrorBody, `Upload failed (${xhr.status})`), xhr.status));
       };
       xhr.send(data);
     });

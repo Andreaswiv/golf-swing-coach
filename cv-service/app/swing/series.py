@@ -47,6 +47,7 @@ BONES = [
     ("left_ankle", "left_foot_index"), ("right_ankle", "right_foot_index"),
 ]
 MAX_BONE_FACTOR = 1.4  # the "usual" length is the 90th percentile, so this leaves room for noise
+WRISTS = ["left_wrist", "right_wrist"]
 
 
 @dataclass
@@ -112,7 +113,7 @@ def build_series(payload: dict) -> Series:
         xy, vis = xy[:, perm], vis[:, perm]
 
     rejected = np.zeros(vis.shape, dtype=bool)
-    scale = _raw_torso_length(xy)
+    scale = median_torso_length(xy)
     if scale is not None:
         max_len = max(1, int(round(fps * SPIKE_MAX_S)))
         for j in range(xy.shape[1]):
@@ -147,8 +148,8 @@ def rejected_landmarks(s: Series) -> dict[str, list[int]]:
     return out
 
 
-def _raw_torso_length(xy: np.ndarray) -> float | None:
-    """Median shoulder-centre to hip-centre distance in px, before smoothing; None if unknown."""
+def median_torso_length(xy: np.ndarray) -> float | None:
+    """Median shoulder-centre to hip-centre distance in px; None if unknown. ``xy``: (F, 33, 2)."""
     shoulders = (xy[:, LANDMARK_INDEX["left_shoulder"]] + xy[:, LANDMARK_INDEX["right_shoulder"]]) / 2
     hips = (xy[:, LANDMARK_INDEX["left_hip"]] + xy[:, LANDMARK_INDEX["right_hip"]]) / 2
     lengths = np.linalg.norm(shoulders - hips, axis=1)
@@ -177,24 +178,29 @@ def find_spikes(p: np.ndarray, max_len: int, min_jump: float, max_return: float)
     n = len(p)
     out = np.zeros(n, dtype=bool)
     known = ~np.isnan(p[:, 0])
-    for a in range(n - 2):
-        if not known[a]:
+    found = np.zeros(n, dtype=bool)  # frames before a spike already found: only the shortest one counts
+    for length in range(1, max_len + 1):
+        a = np.flatnonzero(known[: max(n - length - 1, 0)] & ~found[: max(n - length - 1, 0)])
+        b = a + length + 1
+        back = known[b] & (np.linalg.norm(p[b] - p[a], axis=1) <= max_return)
+        a, b = a[back], b[back]
+        if not len(a):
             continue
-        for length in range(1, max_len + 1):
-            b = a + length + 1
-            if b >= n:
-                break
-            if not known[b] or np.hypot(*(p[b] - p[a])) > max_return:
-                continue
-            run = p[a + 1 : b]
-            ok = ~np.isnan(run[:, 0])
-            if not ok.any():
-                continue
-            away = np.minimum(np.hypot(*(run[ok] - p[a]).T), np.hypot(*(run[ok] - p[b]).T))
-            if away.max() >= min_jump:
-                out[a + 1 : b] = True
-                break
+        run = a[:, None] + np.arange(1, length + 1)  # (candidates, length) frame numbers
+        away = np.minimum(
+            np.linalg.norm(p[run] - p[a, None], axis=2),
+            np.linalg.norm(p[run] - p[b, None], axis=2),
+        )
+        spike = np.nan_to_num(away, nan=-np.inf).max(axis=1) >= min_jump
+        out[run[spike]] = True
+        found[a[spike]] = True
     return out
+
+
+def _true_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """(start, end) of every run of True values; ``end`` is exclusive."""
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], mask.astype(int), [0]))))
+    return [(int(start), int(end)) for start, end in zip(edges[::2], edges[1::2])]
 
 
 def fill_gaps(y: np.ndarray, max_gap: int) -> np.ndarray:
@@ -203,16 +209,9 @@ def fill_gaps(y: np.ndarray, max_gap: int) -> np.ndarray:
     missing = np.isnan(y)
     if not missing.any() or missing.all():
         return y
-    k, n = 0, len(y)
-    while k < n:
-        if not missing[k]:
-            k += 1
-            continue
-        start = k
-        while k < n and missing[k]:
-            k += 1
-        if start > 0 and k < n and k - start <= max_gap:
-            y[start:k] = np.interp(np.arange(start, k), [start - 1, k], [y[start - 1], y[k]])
+    for start, end in _true_runs(missing):
+        if start > 0 and end < len(y) and end - start <= max_gap:
+            y[start:end] = np.interp(np.arange(start, end), [start - 1, end], [y[start - 1], y[end]])
     return y
 
 
@@ -237,18 +236,15 @@ def savgol(y: np.ndarray, window: int, order: int) -> np.ndarray:
 def savgol_runs(y: np.ndarray, window: int, order: int) -> np.ndarray:
     """Smooth each NaN-free run separately; runs shorter than the window stay raw."""
     out = y.copy()
-    valid = ~np.isnan(y)
-    k, n = 0, len(y)
-    while k < n:
-        if not valid[k]:
-            k += 1
-            continue
-        start = k
-        while k < n and valid[k]:
-            k += 1
-        if k - start >= window:
-            out[start:k] = savgol(y[start:k], window, order)
+    for start, end in _true_runs(~np.isnan(y)):
+        if end - start >= window:
+            out[start:end] = savgol(y[start:end], window, order)
     return out
+
+
+def visibility_confidence(visibility: float) -> float:
+    """Map a mean landmark visibility to a 0..1 confidence score."""
+    return float(np.clip((visibility - 0.3) / 0.5, 0.0, 1.0))
 
 
 def weighted_point(s: Series, names: list[str], floor: float = 0.05) -> np.ndarray:

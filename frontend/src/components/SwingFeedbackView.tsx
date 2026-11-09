@@ -6,10 +6,16 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { TONE_CLASS, isClubFinding, verdict } from "@/swingLabels";
 
-const KIND: Record<SwingFinding["kind"], { label: string; badge: string; icon: LucideIcon; iconCls: string }> = {
-  improve: { label: "Work on this", badge: "bg-bad-soft text-bad", icon: Target, iconCls: "bg-bad-soft text-bad" },
-  watch: { label: "Worth checking", badge: "bg-warn-soft text-warn", icon: Eye, iconCls: "bg-warn-soft text-warn" },
-  strength: { label: "Strength", badge: "bg-good-soft text-good", icon: Check, iconCls: "bg-good-soft text-good" },
+const KIND: Record<SwingFinding["kind"], { label: string; cls: string; dot: string; icon: LucideIcon; count: (n: number) => string }> = {
+  improve: { label: "Work on this", cls: TONE_CLASS.bad, dot: "bg-bad", icon: Target, count: () => "to work on" },
+  watch: { label: "Worth checking", cls: TONE_CLASS.warn, dot: "bg-warn", icon: Eye, count: () => "worth checking" },
+  strength: {
+    label: "Strength",
+    cls: TONE_CLASS.good,
+    dot: "bg-good",
+    icon: Check,
+    count: (n) => (n === 1 ? "strength" : "strengths"),
+  },
 };
 
 function reliability(c: number): string {
@@ -40,8 +46,8 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
           <p className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
             {counts.map(({ k, n }) => (
               <span key={k} className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${k === "strength" ? "bg-good" : k === "improve" ? "bg-bad" : "bg-warn"}`} />
-                {n} {k === "strength" ? (n === 1 ? "strength" : "strengths") : k === "improve" ? "to work on" : "worth checking"}
+                <span className={cn("h-2 w-2 rounded-full", KIND[k].dot)} />
+                {n} {KIND[k].count(n)}
               </span>
             ))}
           </p>
@@ -55,12 +61,12 @@ export default function SwingFeedbackView({ feedback, onSeek }: Props) {
           <article key={f.code}>
             <Card className="gap-0 p-6">
             <div className="flex gap-4">
-              <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-full", kind.iconCls)}>
+              <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-full", kind.cls)}>
                 <Icon className="size-5" />
               </span>
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap gap-1.5">
-                  <Badge className={cn("rounded-md", kind.badge)}>{kind.label}</Badge>
+                  <Badge className={cn("rounded-md", kind.cls)}>{kind.label}</Badge>
                   {isClubFinding(f) && (
                     <Badge variant="secondary" className="rounded-md text-muted-foreground">
                       From club tracking
